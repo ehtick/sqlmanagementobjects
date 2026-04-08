@@ -38,8 +38,7 @@ namespace Microsoft.SqlServer.Test.SMO.DMF
         /// policy evaluation results in a single entry in the EvaluationHistories table.
         /// </summary>
         [TestMethod]
-        [SupportedServerVersionRange(DatabaseEngineType = DatabaseEngineType.Standalone, MinMajor = 10)]
-        // This is flakey on MI so disabling for now
+        [SupportedServerVersionRange(DatabaseEngineType = DatabaseEngineType.Standalone, MinMajor = 10, Edition = DatabaseEngineEdition.Enterprise)]
         [UnsupportedDatabaseEngineEdition(DatabaseEngineEdition.SqlManagedInstance)]
         public void When_LogOnSuccess_is_true_Policy_EvaluationHistories_match_server_data()
         {
