@@ -1,8 +1,14 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System;
 using System.Collections.Specialized;
 using System.Linq;
+#if MICROSOFTDATA
+    using Microsoft.Data.SqlClient;
+#else
+    using System.Data.SqlClient;
+#endif
 using Microsoft.SqlServer.Management.Common;
 using Microsoft.SqlServer.Management.Sdk.Sfc;
 using Microsoft.SqlServer.Test.Manageability.Utils;
@@ -166,6 +172,71 @@ namespace Microsoft.SqlServer.Test.SMO.ScriptingTests
                    Assert.That(server.MasterDBLogPath, Is.Not.Empty, "MasterDB log path must not be empty!");
                }
             );
+        }
+
+        /// <summary>
+        /// RootDirectory is marked 'expensive' so it is excluded from the bulk fetch of Server.Information properties.
+        /// This ensures that a user who lacks permission to execute xp_instance_regread (which RootDirectory relies on)
+        /// can still read the other Information properties without the property fetch throwing.
+        /// </summary>
+        [TestMethod]
+        [SupportedServerVersionRange(DatabaseEngineType = DatabaseEngineType.Standalone, MinMajor = 11, HostPlatform = "Windows")]
+        [UnsupportedDatabaseEngineEdition(DatabaseEngineEdition.SqlManagedInstance)]
+        public void Server_Information_properties_readable_without_xp_instance_regread_permission()
+        {
+            ExecuteTest(() =>
+            {
+                var loginName = "regread_login_" + Guid.NewGuid().ToString("N");
+                var password = SqlTestRandom.GeneratePassword();
+                ServerContext.CreateLogin(loginName, _SMO.LoginType.SqlLogin, password);
+                var master = ServerContext.Databases["master"];
+                try
+                {
+                    // Grant enough to read the SERVERPROPERTY/DMV-based Information properties, but deny the registry
+                    // read used by RootDirectory so we can prove the other properties don't depend on it.
+                    ServerContext.ConnectionContext.ExecuteNonQuery($"GRANT VIEW SERVER STATE TO [{loginName}]");
+                    master.ExecutionManager.ExecuteNonQuery($"CREATE USER [{loginName}] FOR LOGIN [{loginName}]");
+                    master.ExecutionManager.ExecuteNonQuery($"DENY EXECUTE ON sys.xp_instance_regread TO [{loginName}]");
+
+                    var connectionString = new SqlConnectionStringBuilder(this.SqlConnectionStringBuilder.ConnectionString)
+                    {
+                        UserID = loginName,
+                        Password = password,
+                        IntegratedSecurity = false,
+                        InitialCatalog = "master",
+                        Pooling = false
+                    };
+                    var restrictedConnection = new ServerConnection(new SqlConnection(connectionString.ConnectionString));
+                    try
+                    {
+                        var restrictedServer = new _SMO.Server(restrictedConnection);
+
+                        // Reading the non-expensive Information properties must not trigger xp_instance_regread, so it must not throw.
+                        Assert.DoesNotThrow(() =>
+                        {
+                            var info = restrictedServer.Information;
+                            TraceHelper.TraceInformation(
+                                "Edition='{0}' VersionString='{1}' Collation='{2}' EngineEdition='{3}' IsCaseSensitive='{4}'",
+                                info.Edition, info.VersionString, info.Collation, info.EngineEdition, info.IsCaseSensitive);
+                        }, "A user without xp_instance_regread permission should be able to read Information properties that do not depend on the registry.");
+
+                        // RootDirectory still relies on xp_instance_regread, which is denied for this user, so requesting it explicitly should throw.
+                        Assert.Throws<ExecutionFailureException>(
+                            () => { var _ = restrictedServer.Information.RootDirectory; },
+                            "RootDirectory relies on xp_instance_regread, which is denied for this user, so it should throw when requested.");
+                    }
+                    finally
+                    {
+                        restrictedConnection.Disconnect();
+                    }
+                }
+                finally
+                {
+                    master.ExecutionManager.ExecuteNonQuery($"IF DATABASE_PRINCIPAL_ID(N'{loginName}') IS NOT NULL DROP USER [{loginName}]");
+                    // DROP LOGIN IF EXISTS is not supported on SQL Server 2014, so use a conditional drop that works on all versions.
+                    ServerContext.ConnectionContext.ExecuteNonQuery($"IF SUSER_ID(N'{loginName}') IS NOT NULL DROP LOGIN [{loginName}]");
+                }
+            });
         }
 
         #endregion Server Functionality Tests

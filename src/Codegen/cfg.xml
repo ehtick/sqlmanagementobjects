@@ -45,6 +45,7 @@
       <property name="VersionMinor" generate="true" is_intrinsic="false" />
       <property name="BuildNumber" generate="true" is_intrinsic="false" />
       <property name="IsCaseSensitive" generate="true" is_intrinsic="false" />
+      <property name="IsLocalDB" generate="true" is_intrinsic="false" />
       <property name="IsFullTextInstalled" generate="true" is_intrinsic="false" />
       <property name="IsJsonDataTypeEnabled" generate="true" is_intrinsic="false" />
       <property name="MasterDBLogPath" generate="true" is_intrinsic="false" />

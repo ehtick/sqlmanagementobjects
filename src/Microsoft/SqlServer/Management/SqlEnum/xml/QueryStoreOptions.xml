@@ -24,10 +24,11 @@
     </version>
 
     <version min_major='15'>
+      <!-- Defaults from https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-database-query-store-options-transact-sql -->
       <property name="CapturePolicyExecutionCount" type="int" mode="deploy">ISNULL(dqso.capture_policy_execution_count,30)</property>
       <property name="CapturePolicyTotalCompileCpuTimeInMS" type="bigint" mode="deploy">ISNULL(dqso.capture_policy_total_compile_cpu_time_ms,1000)</property>
       <property name="CapturePolicyTotalExecutionCpuTimeInMS" type="bigint" mode="deploy">ISNULL(dqso.capture_policy_total_execution_cpu_time_ms,100)</property>
-      <property name="CapturePolicyStaleThresholdInHrs" type="int" mode="deploy">ISNULL(dqso.capture_policy_stale_threshold_hours,1)</property>
+      <property name="CapturePolicyStaleThresholdInHrs" type="int" mode="deploy">ISNULL(dqso.capture_policy_stale_threshold_hours,24)</property>
     </version>
 
   </properties>

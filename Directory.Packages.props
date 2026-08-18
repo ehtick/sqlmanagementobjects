@@ -25,7 +25,7 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" />
     <PackageVersion Include="Microsoft.Data.SqlClient" Version="$(SqlClientPackageVersion)" />
     <PackageVersion Include="Microsoft.Identity.Client" Version="4.79.2" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.3.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.4.0" />
     <PackageVersion Include="Microsoft.SqlServer.ADO.Identity" Version="171.38.0" />
     <!-- Assessment version needs to match in Microsoft.SqlServer.Management.Assessment.nuspec -->
     <PackageVersion Include="Microsoft.SqlServer.Assessment" Version="1.1.9" /> 
@@ -33,7 +33,7 @@
     <PackageVersion Include="Moq" Version="4.16.1" />
     <PackageVersion Include="MSTest.TestAdapter" Version="2.2.10" />
     <PackageVersion Include="MSTest.TestFramework" Version="2.2.10" />
-    <PackageVersion Include="NewtonSoft.Json" Version="13.0.1" />
+    <PackageVersion Include="NewtonSoft.Json" Version="13.0.3" />
     <PackageVersion Include="NUnit" Version="3.11.0" />
     <PackageVersion Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     <PackageVersion Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" /> <!-- prevent double writes -->
@@ -51,8 +51,8 @@
 
   <ItemGroup>
     <!-- GlobalPackageReference packages are installed and processed by msbuild but are not referenced by the C# compiler -->
-    <GlobalPackageReference Include="Microsoft.TestPlatform" Version="17.6.0" GeneratePathProperty="true" />
+    <GlobalPackageReference Include="Microsoft.TestPlatform" Version="18.4.0" GeneratePathProperty="true" />
     <GlobalPackageReference Include="Microsoft.CodeAnalysis.ResxSourceGenerator" Version="5.0.0-1.25277.114" />
+    <GlobalPackageReference Include="Polysharp" Version="1.15.0" />
   </ItemGroup>
-  
 </Project>

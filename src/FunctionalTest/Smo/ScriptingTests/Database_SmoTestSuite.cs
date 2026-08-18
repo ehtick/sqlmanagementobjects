@@ -1403,15 +1403,12 @@ namespace Microsoft.SqlServer.Test.SMO.ScriptingTests
             ExecuteWithDbDrop((db) =>
             {
                 CreateTestMasterKey(db);
-                String password1 = "password_1234";
-                String password2 = "password_2345";
-                String password3 = "password_3456";
 
-                String keyName = GenerateUniqueSmoObjectName("asym_key_name", maxLength: 12);
-                AsymmetricKey key = new AsymmetricKey(db, keyName);
-                AsymmetricKeyEncryptionAlgorithm encrAlgo = AsymmetricKeyEncryptionAlgorithm.Rsa2048;
+                var keyName = GenerateUniqueSmoObjectName("asym_key_name", maxLength: 12);
+                var key = new AsymmetricKey(db, keyName);
+                var encrAlgo = AsymmetricKeyEncryptionAlgorithm.Rsa2048;
 
-                key.Create(encrAlgo, password1);
+                key.Create(encrAlgo, $"P@{Guid.NewGuid()}!");
 
                 db.Refresh();
 
@@ -1419,11 +1416,11 @@ namespace Microsoft.SqlServer.Test.SMO.ScriptingTests
                 Assert.That(db.AsymmetricKeys[keyName].Name, Is.EqualTo(keyName), "Key name should be equal to the value provided in key initialization");
                 Assert.That(db.AsymmetricKeys[keyName].KeyEncryptionAlgorithm, Is.EqualTo(encrAlgo), "Encryption algorithm should be equal to the value provided in key initialization");
 
-                String certName = GenerateUniqueSmoObjectName("cert_name", maxLength: 12);
-                Certificate cert = new Certificate(db, certName);
+                var certName = GenerateUniqueSmoObjectName("cert_name", maxLength: 12);
+                var cert = new Certificate(db, certName);
                 cert.Subject = "SMO test cert subject";
 
-                cert.Create(password2);
+                cert.Create($"P@{Guid.NewGuid()}!");
 
                 db.Refresh();
 
@@ -1431,9 +1428,9 @@ namespace Microsoft.SqlServer.Test.SMO.ScriptingTests
                 Assert.That(db.Certificates[certName].Name, Is.EqualTo(certName), "Certificate name should be equal to the value provided in initialization");
 
                 keyName = GenerateUniqueSmoObjectName("sym_key_name", maxLength: 12);
-                SymmetricKey symKey = new SymmetricKey(db, keyName);
-                SymmetricKeyEncryption keyParams = new SymmetricKeyEncryption(KeyEncryptionType.Password, password3);
-                SymmetricKeyEncryptionAlgorithm symEncrAlgo = SymmetricKeyEncryptionAlgorithm.Aes256;
+                var symKey = new SymmetricKey(db, keyName);
+                var keyParams = new SymmetricKeyEncryption(KeyEncryptionType.Password, $"P@{Guid.NewGuid()}!");
+                var symEncrAlgo = SymmetricKeyEncryptionAlgorithm.Aes256;
 
                 symKey.Create(keyParams, symEncrAlgo);
 

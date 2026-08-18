@@ -129,13 +129,12 @@
     </version>
 
     <version min_major="17" cloud_min_major="12">
-        <!-- AutomaticIndexCompaction is only supported on Azure SQL Database and Azure SQL Managed Instance-->
         <prefix fields='#AutomaticIndexCompactionEnabled#'>
-              create table #aictemp (database_id int primary key, is_automatic_index_compaction_on bit)
-              if (((SERVERPROPERTY('EngineEdition') = 8 AND SERVERPROPERTY('ProductUpdateType') = 'Continuous')) OR SERVERPROPERTY('EngineEdition') = 5)
-              BEGIN
-              exec sp_executesql N'insert into #aictemp (database_id, is_automatic_index_compaction_on) select d.database_id, d.is_automatic_index_compaction_on from sys.databases d'
-              END
+            create table #aictemp (database_id int primary key, is_automatic_index_compaction_on bit)
+            if exists (select * from sys.all_columns where object_id = object_id('sys.databases') and name = 'is_automatic_index_compaction_on')
+            BEGIN
+            exec sp_executesql N'insert into #aictemp (database_id, is_automatic_index_compaction_on) select d.database_id, d.is_automatic_index_compaction_on from sys.databases d'
+            END
         </prefix>
     </version>
 

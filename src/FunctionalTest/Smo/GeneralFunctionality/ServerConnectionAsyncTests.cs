@@ -1,11 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-#if MICROSOFTDATA
-using Microsoft.Data.SqlClient;
-#else
-using System.Data.SqlClient;
-#endif
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -13,6 +8,11 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+#if MICROSOFTDATA
+using Microsoft.Data.SqlClient;
+#else
+using System.Data.SqlClient;
+#endif
 using Microsoft.SqlServer.Management.Common;
 using Microsoft.SqlServer.Management.Smo;
 using Microsoft.SqlServer.Test.Manageability.Utils;
@@ -53,9 +53,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void ServerConnection_ExecuteNonQueryAsync_SingleCommand_ReturnsRowCount()
+        public async Task ServerConnection_ExecuteNonQueryAsync_SingleCommand_ReturnsRowCount()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var table = new Table(db, $"TestTable_{Guid.NewGuid():N}");
                 table.Columns.Add(new Column(table, "Id", DataType.Int));
@@ -66,8 +66,8 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 try
                 {
                     // Insert some rows
-                    var rowsAffected = serverConnection.ExecuteNonQueryAsync(
-                        $"INSERT INTO [{table.Name}] VALUES (1, 'Test1'), (2, 'Test2'), (3, 'Test3')").GetAwaiter().GetResult();
+                    var rowsAffected = await serverConnection.ExecuteNonQueryAsync(
+                        $"INSERT INTO [{table.Name}] VALUES (1, 'Test1'), (2, 'Test2'), (3, 'Test3')");
 
                     // Assert
                     Assert.That(rowsAffected, Is.EqualTo(3), "Expected 3 rows to be affected by INSERT");
@@ -86,9 +86,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void ServerConnection_ExecuteNonQueryAsync_BatchCommands_ExecutesSequentially()
+        public async Task ServerConnection_ExecuteNonQueryAsync_BatchCommands_ExecutesSequentially()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var table = new Table(db, $"TestTable_{Guid.NewGuid():N}");
                 table.Columns.Add(new Column(table, "Id", DataType.Int));
@@ -106,11 +106,11 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                         $"INSERT INTO [{table.Name}] VALUES (3, 'Third')"
                     };
 
-                    var totalAffected = serverConnection.ExecuteNonQueryAsync(commands).GetAwaiter().GetResult();
+                    var totalAffected = await serverConnection.ExecuteNonQueryAsync(commands);
 
                     // Verify data was inserted
-                    var dataTable = serverConnection.ExecuteWithResultsAsync(
-                        $"SELECT COUNT(*) AS TotalRows FROM [{table.Name}]").GetAwaiter().GetResult();
+                    var dataTable = await serverConnection.ExecuteWithResultsAsync(
+                        $"SELECT COUNT(*) AS TotalRows FROM [{table.Name}]");
                     var rowCount = Convert.ToInt32(dataTable.Rows[0]["TotalRows"]);
 
                     // Assert
@@ -131,9 +131,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void ServerConnection_ExecuteWithResultsAsync_ReturnsDataTable()
+        public async Task ServerConnection_ExecuteWithResultsAsync_ReturnsDataTable()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var table = new Table(db, $"TestTable_{Guid.NewGuid():N}");
                 table.Columns.Add(new Column(table, "Id", DataType.Int));
@@ -147,8 +147,8 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 try
                 {
                     // Query data
-                    var dataTable = serverConnection.ExecuteWithResultsAsync(
-                        $"SELECT Id, Name FROM [{table.Name}] ORDER BY Id").GetAwaiter().GetResult();
+                    var dataTable = await serverConnection.ExecuteWithResultsAsync(
+                        $"SELECT Id, Name FROM [{table.Name}] ORDER BY Id");
 
                     // Assert
                     Assert.That(dataTable, Is.Not.Null, "DataTable should not be null");
@@ -172,15 +172,15 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void ServerConnection_ExecuteScalarAsync_ReturnsScalarValue()
+        public async Task ServerConnection_ExecuteScalarAsync_ReturnsScalarValue()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var serverConnection = CreateServerConnection(db, out var sqlConnection);
                 try
                 {
                     // Execute scalar query
-                    var result = serverConnection.ExecuteScalarAsync("SELECT 42").GetAwaiter().GetResult();
+                    var result = await serverConnection.ExecuteScalarAsync("SELECT 42");
 
                     // Assert
                     Assert.That(result, Is.Not.Null, "Scalar result should not be null");
@@ -199,9 +199,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void ServerConnection_ExecuteReaderAsync_ReturnsOpenReader()
+        public async Task ServerConnection_ExecuteReaderAsync_ReturnsOpenReader()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var table = new Table(db, $"TestTable_{Guid.NewGuid():N}");
                 table.Columns.Add(new Column(table, "Id", DataType.Int));
@@ -215,24 +215,23 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 try
                 {
                     // Execute reader
-                    using (var reader = serverConnection.ExecuteReaderAsync(
-                        $"SELECT Id, Value FROM [{table.Name}] ORDER BY Id").GetAwaiter().GetResult())
-                    {
-                        // Assert
-                        Assert.That(reader, Is.Not.Null, "Reader should not be null");
-                        Assert.That(reader.IsClosed, Is.False, "Reader should be open");
+                    using var reader = await serverConnection.ExecuteReaderAsync(
+                        $"SELECT Id, Value FROM [{table.Name}] ORDER BY Id");
 
-                        // Read first row
-                        var hasRows = reader.ReadAsync().GetAwaiter().GetResult();
-                        Assert.That(hasRows, Is.True, "Reader should have at least one row");
-                        Assert.That(reader.GetInt32(0), Is.EqualTo(1), "First row Id should be 1");
-                        Assert.That(reader.GetString(1), Is.EqualTo("Data1"), "First row Value should be 'Data1'");
+                    // Assert
+                    Assert.That(reader, Is.Not.Null, "Reader should not be null");
+                    Assert.That(reader.IsClosed, Is.False, "Reader should be open");
 
-                        // Read second row
-                        hasRows = reader.ReadAsync().GetAwaiter().GetResult();
-                        Assert.That(hasRows, Is.True, "Reader should have a second row");
-                        Assert.That(reader.GetInt32(0), Is.EqualTo(2), "Second row Id should be 2");
-                    }
+                    // Read first row
+                    var hasRows = await reader.ReadAsync();
+                    Assert.That(hasRows, Is.True, "Reader should have at least one row");
+                    Assert.That(reader.GetInt32(0), Is.EqualTo(1), "First row Id should be 1");
+                    Assert.That(reader.GetString(1), Is.EqualTo("Data1"), "First row Value should be 'Data1'");
+
+                    // Read second row
+                    hasRows = await reader.ReadAsync();
+                    Assert.That(hasRows, Is.True, "Reader should have a second row");
+                    Assert.That(reader.GetInt32(0), Is.EqualTo(2), "Second row Id should be 2");
                 }
                 finally
                 {
@@ -248,12 +247,12 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void ServerConnection_ExecuteNonQueryAsync_CancellationToken_CancelsLongRunningQuery()
+        public async Task ServerConnection_ExecuteNonQueryAsync_CancellationToken_CancelsLongRunningQuery()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var serverConnection = CreateServerConnection(db, out var sqlConnection);
-                var cts = new CancellationTokenSource();
+                using var cts = new CancellationTokenSource();
 
                 try
                 {
@@ -266,7 +265,7 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                     // Assert that the query is cancelled
                     try
                     {
-                        serverConnection.ExecuteNonQueryAsync(longRunningQuery, cts.Token).GetAwaiter().GetResult();
+                        await serverConnection.ExecuteNonQueryAsync(longRunningQuery, cts.Token);
                         Assert.Fail("Expected OperationCanceledException or ExecutionFailureException to be thrown");
                     }
                     catch (OperationCanceledException)
@@ -282,7 +281,6 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 }
                 finally
                 {
-                    cts.Dispose();
                     serverConnection.Disconnect();
                     sqlConnection.Dispose();
                 }
@@ -294,9 +292,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void ServerConnection_ExecuteNonQueryAsync_CancellationDuringBatch_ThrowsAndStops()
+        public async Task ServerConnection_ExecuteNonQueryAsync_CancellationDuringBatch_ThrowsAndStops()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var table = new Table(db, $"TestTable_{Guid.NewGuid():N}");
                 table.Columns.Add(new Column(table, "Id", DataType.Int));
@@ -304,7 +302,7 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 table.Create();
 
                 var serverConnection = CreateServerConnection(db, out var sqlConnection);
-                var cts = new CancellationTokenSource();
+                using var cts = new CancellationTokenSource();
 
                 try
                 {
@@ -322,7 +320,7 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                     // Execute batch with cancellation
                     try
                     {
-                        serverConnection.ExecuteNonQueryAsync(commands, cts.Token).GetAwaiter().GetResult();
+                        await serverConnection.ExecuteNonQueryAsync(commands, cts.Token);
                         Assert.Fail("Expected cancellation exception");
                     }
                     catch (OperationCanceledException)
@@ -339,8 +337,8 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                     var verifyConnection = CreateServerConnection(db, out var verifySqlConnection);
                     try
                     {
-                        var dataTable = verifyConnection.ExecuteWithResultsAsync(
-                            $"SELECT COUNT(*) AS TotalRows FROM [{table.Name}]").GetAwaiter().GetResult();
+                        var dataTable = await verifyConnection.ExecuteWithResultsAsync(
+                            $"SELECT COUNT(*) AS TotalRows FROM [{table.Name}]");
                         var rowCount = Convert.ToInt32(dataTable.Rows[0]["TotalRows"]);
 
                         // The third INSERT (after WAITFOR) must not have executed.
@@ -357,7 +355,6 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 }
                 finally
                 {
-                    cts.Dispose();
                     serverConnection.Disconnect();
                     sqlConnection.Dispose();
                     table.Drop();

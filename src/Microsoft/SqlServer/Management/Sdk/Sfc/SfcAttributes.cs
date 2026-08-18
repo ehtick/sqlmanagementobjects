@@ -230,7 +230,7 @@ namespace Microsoft.SqlServer.Management.Sdk.Sfc.Metadata
             }
             this.m_args = parameters;
 
-            // This particular ctor of SfcReference behaves like the SfcReferenceCollection ones.
+            // This particular ctor of SfcReference uses a static factory method to obtain a resolver interface.
             // It leaves the other patterns alone for back compat since they employ a delegate way of resolving,
             // whereas this ctor just calls a static factory method to get an interface to resolve with later on.
 

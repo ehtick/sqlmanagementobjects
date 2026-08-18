@@ -35,6 +35,7 @@
      -->
     <UseMicrosoftData Condition="'$(GacVersion)'=='true' and '$(TargetGroup)'=='netfx'">false</UseMicrosoftData>
     <DefineConstants Condition="'$(UseMicrosoftData)' != 'false'" >$(DefineConstants);MICROSOFTDATA</DefineConstants>
+    <LangVersion>13</LangVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(GacVersion)' == 'true' and '$(TargetGroup)' == 'netfx'">
      <UseNativeBatchParser>true</UseNativeBatchParser>

@@ -1,16 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-#if MICROSOFTDATA
-using Microsoft.Data.SqlClient;
-#else
-using System.Data.SqlClient;
-#endif
 using System;
 using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+#if MICROSOFTDATA
+using Microsoft.Data.SqlClient;
+#else
+using System.Data.SqlClient;
+#endif
 using Microsoft.SqlServer.Management.Common;
 using Microsoft.SqlServer.Management.Sdk.Sfc;
 using Microsoft.SqlServer.Management.Smo;
@@ -36,9 +36,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void Enumerator_GetDataAsync_ServerProperties_MatchesSyncVersion()
+        public async Task Enumerator_GetDataAsync_ServerProperties_MatchesSyncVersion()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var serverConnection = db.ExecutionManager.ConnectionContext;
                 var urn = new Urn("Server");
@@ -50,7 +50,7 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 var syncData = (DataTable)syncResult.Data;
 
                 // Get data using async method
-                var asyncResult = Enumerator.GetDataAsync(serverConnection, request).GetAwaiter().GetResult();
+                var asyncResult = await Enumerator.GetDataAsync(serverConnection, request);
                 var asyncData = (DataTable)asyncResult.Data;
 
                 // Assert both results have data
@@ -85,9 +85,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void Enumerator_GetDataAsync_DatabaseList_MatchesSyncVersion()
+        public async Task Enumerator_GetDataAsync_DatabaseList_MatchesSyncVersion()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var serverConnection = db.ExecutionManager.ConnectionContext;
                 var urn = new Urn("Server/Database");
@@ -99,7 +99,7 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 var syncData = (DataTable)syncResult.Data;
 
                 // Get data using async method
-                var asyncResult = Enumerator.GetDataAsync(serverConnection, request).GetAwaiter().GetResult();
+                var asyncResult = await Enumerator.GetDataAsync(serverConnection, request);
                 var asyncData = (DataTable)asyncResult.Data;
 
                 // Assert both results have data
@@ -128,9 +128,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void Enumerator_GetDataAsync_CancellationToken_CancelsOperation()
+        public async Task Enumerator_GetDataAsync_CancellationToken_CancelsOperation()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var serverConnection = db.ExecutionManager.ConnectionContext;
                 var urn = new Urn("Server/Database");
@@ -138,13 +138,13 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 var request = new Request(urn, properties);
 
                 // Create a cancellation token that is already cancelled
-                var cts = new CancellationTokenSource();
+                using var cts = new CancellationTokenSource();
                 cts.Cancel();
 
                 // Attempt to get data with cancelled token
                 try
                 {
-                    var asyncResult = Enumerator.GetDataAsync(serverConnection, request, cts.Token).GetAwaiter().GetResult();
+                    var asyncResult = await Enumerator.GetDataAsync(serverConnection, request, cts.Token);
                     // If we get here, the operation wasn't properly cancelled
                     // This might happen if the operation completes before cancellation is checked
                     // So we don't fail the test, but log a warning
@@ -168,9 +168,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void ExecutionManager_GetEnumeratorDataAsync_ReturnsDataTable()
+        public async Task ExecutionManager_GetEnumeratorDataAsync_ReturnsDataTable()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var executionManager = db.ExecutionManager;
                 var urn = new Urn($"Server/Database[@Name='{Urn.EscapeString(db.Name)}']");
@@ -178,7 +178,7 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 var request = new Request(urn, properties);
 
                 // Call internal GetEnumeratorDataAsync method directly (accessible via InternalsVisibleTo)
-                var result = executionManager.GetEnumeratorDataAsync(request, CancellationToken.None).GetAwaiter().GetResult();
+                var result = await executionManager.GetEnumeratorDataAsync(request, CancellationToken.None);
 
                 // Assert we got data
                 Assert.IsNotNull(result, "Result should not be null");
@@ -192,9 +192,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void ExecutionManager_GetEnumeratorDataReaderAsync_ReturnsReader()
+        public async Task ExecutionManager_GetEnumeratorDataReaderAsync_ReturnsReader()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var executionManager = db.ExecutionManager;
                 var urn = new Urn($"Server/Database[@Name='{Urn.EscapeString(db.Name)}']");
@@ -202,7 +202,7 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 var request = new Request(urn, properties);
 
                 // Call internal GetEnumeratorDataReaderAsync method directly (accessible via InternalsVisibleTo)
-                var reader = executionManager.GetEnumeratorDataReaderAsync(request, CancellationToken.None).GetAwaiter().GetResult();
+                var reader = await executionManager.GetEnumeratorDataReaderAsync(request, CancellationToken.None);
 
                 try
                 {
@@ -230,9 +230,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void Enumerator_GetDataAsync_TableProperties_MatchesSyncVersion()
+        public async Task Enumerator_GetDataAsync_TableProperties_MatchesSyncVersion()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var serverConnection = db.ExecutionManager.ConnectionContext;
                 Table table = null;
@@ -260,7 +260,7 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                     var syncData = (DataTable)syncResult.Data;
 
                     // Get data using async method
-                    var asyncResult = Enumerator.GetDataAsync(serverConnection, request).GetAwaiter().GetResult();
+                    var asyncResult = await Enumerator.GetDataAsync(serverConnection, request);
                     var asyncData = (DataTable)asyncResult.Data;
 
                     // Assert both results have data
@@ -299,9 +299,9 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
         /// </summary>
         [TestMethod]
         [SupportedServerVersionRange(MinMajor = 11)]
-        public void Enumerator_GetDataAsync_EnumProperties_CorrectlyConverted()
+        public async Task Enumerator_GetDataAsync_EnumProperties_CorrectlyConverted()
         {
-            ExecuteFromDbPool((db) =>
+            await ExecuteFromDbPoolAsync(async (db) =>
             {
                 var serverConnection = db.ExecutionManager.ConnectionContext;
                 var urn = new Urn($"Server/Database[@Name='{Urn.EscapeString(db.Name)}']");
@@ -315,7 +315,7 @@ namespace Microsoft.SqlServer.Test.SMO.GeneralFunctionality
                 var syncData = (DataTable)syncResult.Data;
 
                 // Get data using async method
-                var asyncResult = Enumerator.GetDataAsync(serverConnection, request).GetAwaiter().GetResult();
+                var asyncResult = await Enumerator.GetDataAsync(serverConnection, request);
                 var asyncData = (DataTable)asyncResult.Data;
 
                 // Assert both results have data

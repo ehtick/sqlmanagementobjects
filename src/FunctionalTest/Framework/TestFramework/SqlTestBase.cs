@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 #if MICROSOFTDATA
 using Microsoft.Data.SqlClient;
@@ -25,7 +26,7 @@ namespace Microsoft.SqlServer.Test.Manageability.Utils.TestFramework
     /// Base class for tests, providing support for executing tests against specified target servers
     /// using the SupportedSqlVersionsAttribute
     /// </summary>
-    public abstract class SqlTestBase
+    public abstract partial class SqlTestBase
     {
         static SqlTestBase()
         {
@@ -335,54 +336,13 @@ namespace Microsoft.SqlServer.Test.Manageability.Utils.TestFramework
         public void ExecuteFromDbPool(
             string poolName,
             Action<Database> testMethod,
-            Action<Database> onDatabaseCreated = null) => this.ExecuteTestMethodWithFailureRetry(
-                () =>
-                {
-                    var databaseHandler = DatabaseHandlerFactory.GetDatabaseHandler(this.TestDescriptorContext);
-                    var db = TestServerPoolManager.GetDbFromPool(poolName, databaseHandler, onDatabaseCreated);
-                    this.ServerContext = databaseHandler.ServerContext ?? db.GetServerObject();
-                    if(this.ServerContext != null && this.ServerContext.ConnectionContext != null)
-                    {
-                        this.SqlConnectionStringBuilder = new SqlConnectionStringBuilder(this.ServerContext.ConnectionContext.ConnectionString);
-                    }   
-                    Trace.TraceInformation($"Returning database {db.Name} for pool {poolName}");
-                    if (db.UserAccess == DatabaseUserAccess.Single || db.ReadOnly)
-                    {
-                        Trace.TraceInformation("Prior test set database to single user, setting back to multiple");
-                        db.UserAccess = DatabaseUserAccess.Multiple;
-                        db.ReadOnly = false;
-                        db.Alter();
-                    }
-                    db.ExecutionManager.ConnectionContext.Disconnect();
-                    db.ExecutionManager.ConnectionContext.SqlExecutionModes = SqlExecutionModes.ExecuteSql;
-                    try
-                    {
-                        TraceHelper.TraceInformation("Invoking PreExecute for target server {0}", this.TestDescriptorContext.Name);
-                        PreExecuteTest();
-                        TraceHelper.TraceInformation("Invoking test method {0} with target server {1} using database from pool {2}",
-                             this.TestContext.TestName, this.TestDescriptorContext.Name, poolName);
-                        testMethod.Invoke(db);
-                        TraceHelper.TraceInformation("Invoking PostExecute for target server {0}",
-                             this.TestDescriptorContext.Name);
-                        PostExecuteTest();
-                    }
-                    catch (Exception e)
-                    {
-                        // Add in some more information
-                        string message = string.Format(
-                            "Test '{0}' failed when targeting server {1}. Message:\n{2}\nStack Trace:\n{3}",
-                            this.TestContext.TestName,
-                            this.TestDescriptorContext.Name,
-                            e.BuildRecursiveExceptionMessage(),
-                            e.StackTrace);
-                        Trace.TraceError(message);
-                        throw new InternalTestFailureException(message, e);
-                    }
-                    finally
-                    {
-                        db.ExecutionManager.ConnectionContext.CapturedSql.Clear();
-                    }
-                });
+            Action<Database> onDatabaseCreated = null)
+        {
+            ExecuteFromDbPoolAsync(
+                poolName,
+                db => { testMethod(db); return Task.CompletedTask; },
+                onDatabaseCreated).GetAwaiter().GetResult();
+        }
 
         /// <summary>
         /// Creates a new database and calls the given test method with that database, then drops
@@ -424,12 +384,15 @@ namespace Microsoft.SqlServer.Test.Manageability.Utils.TestFramework
             string dbNamePrefix,
             string dbBackupFile,
             Action<Database> testMethod,
-            AzureDatabaseEdition dbAzureDatabaseEdition = AzureDatabaseEdition.NotApplicable) => ExecuteWithDbDropImpl(
+            AzureDatabaseEdition dbAzureDatabaseEdition = AzureDatabaseEdition.NotApplicable)
+        {
+            ExecuteWithDbDropImpl(
                 dbNamePrefix: dbNamePrefix,
                 dbAzureDatabaseEdition: dbAzureDatabaseEdition,
                 dbBackupFile: dbBackupFile,
                 createDbSnapshot: false,
-                executeTestMethodMethod: (database) => { testMethod.Invoke(database); });
+                executeTestMethodMethod: database => testMethod.Invoke(database));
+        }
 
         /// <summary>
         /// Restores a database from a backup file OR create a new database, with specific azure db edition if provided,
@@ -445,12 +408,15 @@ namespace Microsoft.SqlServer.Test.Manageability.Utils.TestFramework
             string dbNamePrefix,
             AzureDatabaseEdition dbAzureEdition,
             string dbBackupFile,
-            Action<Database> testMethod) => ExecuteWithDbDropImpl(
+            Action<Database> testMethod)
+        {
+            ExecuteWithDbDropImpl(
                 dbNamePrefix: dbNamePrefix,
                 dbAzureDatabaseEdition: dbAzureEdition,
                 dbBackupFile: dbBackupFile,
                 createDbSnapshot: false,
                 executeTestMethodMethod: testMethod);
+        }
 
         /// <summary>
         /// Restores a database from a backup file OR create a new database, with specific azure db edition if provided,
@@ -468,21 +434,27 @@ namespace Microsoft.SqlServer.Test.Manageability.Utils.TestFramework
             AzureDatabaseEdition dbAzureEdition,
             string dbBackupFile,
             bool createDbSnapshot,
-            Action<Database> testMethod) => ExecuteWithDbDropImpl(
+            Action<Database> testMethod)
+        {
+            ExecuteWithDbDropImpl(
                 dbNamePrefix: dbNamePrefix,
                 dbAzureDatabaseEdition: dbAzureEdition,
                 dbBackupFile: dbBackupFile,
                 createDbSnapshot: createDbSnapshot,
                 executeTestMethodMethod: testMethod);
+        }
 
         /// <summary>
         /// Creates a new database and calls the given test method with that database, then drops it
         /// </summary>
         /// <param name="dbParameters"></param>
         /// <param name="testMethod"></param>
-        public virtual void ExecuteWithDbDrop(DatabaseParameters dbParameters, Action<Database> testMethod) => ExecuteWithDbDropImpl(
+        public virtual void ExecuteWithDbDrop(DatabaseParameters dbParameters, Action<Database> testMethod)
+        {
+            ExecuteWithDbDropImpl(
                 dbParameters: dbParameters,
                 executeTestMethodMethod: testMethod);
+        }
         /// <summary>
         /// Implementation of the ExecuteWithDbDrop, calls executeTestMethodMethod once for each supported server version
         /// </summary>
@@ -524,73 +496,9 @@ namespace Microsoft.SqlServer.Test.Manageability.Utils.TestFramework
             DatabaseParameters dbParameters,
             Action<Database> executeTestMethodMethod)
         {
-            var requestedEdition = dbParameters.AzureDatabaseEdition;
-            IDatabaseHandler databaseHandler = null;
-            this.ExecuteTestMethodWithFailureRetry(
-                () =>
-                {
-                    var originalEdition = requestedEdition;
-                    if (requestedEdition == AzureDatabaseEdition.NotApplicable)
-                    {
-                        // if the default edition specified in the XML for the current server is DW, 
-                        // pass that along to the helper
-                        var desiredEdition = ConnectionHelpers.GetDefaultEdition(TargetServerFriendlyName);
-                        if (desiredEdition == DatabaseEngineEdition.SqlDataWarehouse)
-                        {
-                            requestedEdition = dbParameters.AzureDatabaseEdition = AzureDatabaseEdition.DataWarehouse;
-                        }
-                    }
-                    Database db;
-                    try
-                    {
-                        databaseHandler = DatabaseHandlerFactory.GetDatabaseHandler(this.TestDescriptorContext);
-                        db = databaseHandler.HandleDatabaseCreation(dbParameters);
-                        this.ServerContext = databaseHandler.ServerContext;
-                        this.SqlConnectionStringBuilder = new SqlConnectionStringBuilder(this.ServerContext.ConnectionContext.ConnectionString);
-                    }
-                    finally
-                    {
-                        requestedEdition = originalEdition;
-                    }
-                    Database dbSnapshot = dbParameters.CreateSnapshot ? this.ServerContext.CreateDbSnapshotWithRetry(db) : null;
-
-                    try
-                    {
-                        TraceHelper.TraceInformation("Invoking PreExecute for target server {0}", this.ServerContext.Name);
-                        PreExecuteTest();
-                        TraceHelper.TraceInformation("Invoking test method {0} with target server {1}",
-                             this.TestContext.TestName, this.ServerContext.Name);
-                        executeTestMethodMethod.Invoke(db);
-                        TraceHelper.TraceInformation("Invoking PostExecute for target server {0}",
-                             this.ServerContext.Name);
-                        PostExecuteTest();
-                    }
-                    catch (Exception e)
-                    {
-                        // Add in some more information
-                        string message = string.Format(
-                            "Test '{0}' failed when targeting server {1}. Message:\n{2}\nStack Trace:\n{3}",
-                            this.TestContext.TestName,
-                            this.TestDescriptorContext.Name,
-                            e.BuildRecursiveExceptionMessage(),
-                            e.StackTrace);
-                        Trace.TraceError(message);
-                        throw new InternalTestFailureException(message, e);
-                    }
-                    finally
-                    {
-                        // snapshots have to be deleted first
-                        if (dbSnapshot != null)
-                        {
-                            ServerContext.DropKillDatabaseNoThrow(dbSnapshot.Name);
-                        }
-                        if(databaseHandler != null)
-                        {
-                            // Drop the database
-                            databaseHandler.HandleDatabaseDrop();
-                        }
-                    }
-                });
+            ExecuteWithDbDropImplAsync(
+                dbParameters,
+                db => { executeTestMethodMethod(db); return Task.CompletedTask; }).GetAwaiter().GetResult();
         }
             
         /// <summary>
@@ -721,8 +629,11 @@ namespace Microsoft.SqlServer.Test.Manageability.Utils.TestFramework
         /// Returns the master database in the given server context
         /// </summary>
         /// <param name="testMethod">The test method to execute, with the newly created database passed as a parameter</param>
-        public void ExecuteWithMasterDb(Action<Database> testMethod) => ExecuteWithMasterDbImpl(AzureDatabaseEdition.NotApplicable,
-                (database) => { testMethod.Invoke(database); });
+        public void ExecuteWithMasterDb(Action<Database> testMethod)
+        {
+            ExecuteWithMasterDbImpl(AzureDatabaseEdition.NotApplicable,
+                database => testMethod.Invoke(database));
+        }
 
 
         /// <summary>
@@ -732,16 +643,19 @@ namespace Microsoft.SqlServer.Test.Manageability.Utils.TestFramework
         /// <param name="executeTestMethodMethod">
         /// The action called to invoke the test method, this should simply just call the test method itself with whatever parameters it needs
         /// </param>
-        public void ExecuteWithMasterDbImpl(AzureDatabaseEdition edition, Action<Database> executeTestMethodMethod) => this.ExecuteTestMethodWithFailureRetry(
+        public void ExecuteWithMasterDbImpl(AzureDatabaseEdition edition, Action<Database> executeTestMethodMethod)
+        {
+            this.ExecuteTestMethodWithFailureRetry(
                () =>
                {
                    // Initialize the server context
                    var databaseHandler = DatabaseHandlerFactory.GetDatabaseHandler(this.TestDescriptorContext);
                    this.ServerContext = databaseHandler.ServerContext;
                    this.SqlConnectionStringBuilder = new SqlConnectionStringBuilder(this.ServerContext.ConnectionContext.ConnectionString);
-                   Database database = this.ServerContext.Databases["master"];
+                   var database = this.ServerContext.Databases["master"];
                    executeTestMethodMethod(database);
                });
+        }
 
         #region Private Helper Methods
 
@@ -755,94 +669,8 @@ namespace Microsoft.SqlServer.Test.Manageability.Utils.TestFramework
         /// <param name="testMethod"></param>
         private void ExecuteTestMethodWithFailureRetry(Action testMethod)
         {
-            var targetServerExceptions = new LinkedList<Tuple<string, Exception>>();
-            Trace.TraceInformation($"Server filter:{TestContext.Properties["SqlTestTargetServersFilter"]}");
-            var first = true;
-            var connections = ConnectionHelpers.GetServerConnections(this.TestMethod, TestContext.SqlTestTargetServersFilter);
-            foreach (var connection in connections)
-            {
-                // Prevent nunit assert messages from accumulating between server version iterations
-                using (new NUnit.Framework.Internal.TestExecutionContext.IsolatedContext())
-                {
-                    try
-                    {
-                        bool passed = false;
-                        var exceptions = new LinkedList<Tuple<string, Exception>>();
-                        // some tests target a specific server but use a hard coded friendly name
-                        // any test that matches multiple servers isn't doing that.
-                        if (!first || TargetServerFriendlyName == null)
-                        {
-                            TargetServerFriendlyName = connection.FriendlyName;
-                        }
-
-                        first = false;
-                        passed = ExecuteTestOnConnection(connection, testMethod, exceptions);
-
-                        if (!passed)
-                        {
-                            //Build up the aggregate exception of all the exceptions we gathered during the run. We put the message and stack trace for each
-                            //one into the message itself so it's easily visible from the test failure (AggregateException.ToString doesn't print out that
-                            //information by default)
-                            throw new AggregateException(
-                                String.Format(
-                                    "Test '{0}' failed against all defined server connections for target server name {1}{2}",
-                                    this.TestMethod.Name,
-                                    this.TargetServerFriendlyName,
-                                    string.Join("\n",
-                                        exceptions.Select(
-                                            e =>
-                                                String.Format("\n******* {0} *******\n{1}\n{2}", e.Item1,
-                                                    e.Item2.BuildRecursiveExceptionMessage(),
-                                                    e.Item2.StackTrace))))
-                                , exceptions.Select(e => e.Item2));
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        //We failed against one of our target servers, record it and then move on to the next (we'll fail the test once all
-                        //target servers have been ran against)
-                        targetServerExceptions.AddLast(new Tuple<string, Exception>(this.TargetServerFriendlyName, e));
-                    }
-                }
-            }
-
-            //We got some errors against one or more of the target servers, throw an exception with the aggregate information to
-            //fail the test
-            if (targetServerExceptions.Count > 0)
-            {
-                throw new AggregateException(
-                    string.Format(
-                    "Test '{0}' failed against the following TargetServers : {1}\nExceptions : \n{2}",
-                    this.TestMethod.Name,
-                    string.Join(",", targetServerExceptions.Select(e => e.Item1)), //List of all failed server friendly names
-                                                                                   //Formatted exception infor for each target server failure
-                    string.Join("\n", targetServerExceptions.Select(
-                    e =>
-                        String.Format(
-@"******* {0} *******
-Message : {1}
-{2}",
-                            e.Item1, //ServerName
-                            e.Item2.Message,
-                            e.Item2.StackTrace)))));
-            }
-        }
-
-        private bool ExecuteTestOnConnection(ServerConnectionInfo connection, Action testMethod, LinkedList<Tuple<string, Exception>> exceptions)
-        {
-            this.TestDescriptorContext = connection.TestDescriptor;
-            try
-            {
-                testMethod.Invoke();
-                return true; // Test passed successfully
-            }
-            catch (Exception e)
-            {
-                exceptions.AddLast(new Tuple<string, Exception>(
-                    this.SqlConnectionStringBuilder?.DataSource ?? this.TestDescriptorContext.Name,
-                    e));
-                return false;
-            }
+            ExecuteTestMethodWithFailureRetryAsync(
+                () => { testMethod(); return Task.CompletedTask; }).GetAwaiter().GetResult();
         }
 
         #endregion // Private Helper Methods

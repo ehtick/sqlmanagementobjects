@@ -1083,17 +1083,45 @@ END");
         }
 
         [TestMethod]
-        [SupportedServerVersionRange(Edition = DatabaseEngineEdition.Enterprise, MinMajor = 17)]
+        [SupportedServerVersionRange(Edition = DatabaseEngineEdition.Enterprise, MinMajor = 17, MaxMajor = 17)]
         public void Database_Alter_toggles_automatic_index_compaction_not_supported()
         {
             ExecuteFromDbPool(db =>
             {
+                // On box product below v18 (e.g. Enterprise v17) AUTOMATIC_INDEX_COMPACTION is a
+                // disabled property, so SMO does not script it. Alter() succeeds without emitting the
+                // ALTER ... SET statement and the value is never applied, remaining false after refresh.
+                db.AutomaticIndexCompactionEnabled = true;
+                Assert.That(() => db.Alter(), Throws.Nothing,
+                    "Alter should not script AUTOMATIC_INDEX_COMPACTION because it is disabled on box product below v18");
+                db.Parent.Databases.ClearAndInitialize(string.Format("[@Name='{0}']", Urn.EscapeString(db.Name)), new string[] { nameof(Database.AutomaticIndexCompactionEnabled) });
+                db = db.Parent.Databases[db.Name];
+                db.Refresh();
+                Assert.That(db.AutomaticIndexCompactionEnabled, Is.False,
+                    "AutomaticIndexCompactionEnabled remains false because no AIC statement is scripted on box product below v18");
+            });
+        }
+
+        [TestMethod]
+        [SupportedServerVersionRange(Edition = DatabaseEngineEdition.Enterprise, MinMajor = 18)]
+        public void Database_Alter_toggles_automatic_index_compaction_supported_Sql180()
+        {
+            ExecuteFromDbPool(db =>
+            {
+                var server = db.Parent;
+                db.AcceleratedRecoveryEnabled = true;
                 db.AutomaticIndexCompactionEnabled = true;
                 db.Alter();
                 db.Parent.Databases.ClearAndInitialize(string.Format("[@Name='{0}']", Urn.EscapeString(db.Name)), new string[] { nameof(Database.AutomaticIndexCompactionEnabled) });
                 db = db.Parent.Databases[db.Name];
                 db.Refresh();
-                Assert.That(db.AutomaticIndexCompactionEnabled, Is.False, "AutomaticIndexCompactionEnabled not set to true by Alter since we do not generate script for AIC");
+                Assert.That(db.AutomaticIndexCompactionEnabled, Is.True, "AutomaticIndexCompactionEnabled set to true by Alter");
+                db.AutomaticIndexCompactionEnabled = false;
+                db.Alter();
+                db.Parent.Databases.ClearAndInitialize(string.Format("[@Name='{0}']", Urn.EscapeString(db.Name)), new string[] { nameof(Database.AutomaticIndexCompactionEnabled) });
+                db = db.Parent.Databases[db.Name];
+                db.Refresh();
+                Assert.That(db.AutomaticIndexCompactionEnabled, Is.False, "AutomaticIndexCompactionEnabled set to false by Alter");
             });
         }
 

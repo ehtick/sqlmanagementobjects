@@ -318,6 +318,10 @@
       <LogicalName>DatabaseRoleMember.xml</LogicalName>
       <Link>xml\DatabaseRoleMember.xml</Link>
     </EmbeddedResource>
+    <EmbeddedResource Include="$(SqlEnumSourcesFiles)\xml\DatabaseRoleDirectMember.xml">
+      <LogicalName>DatabaseRoleDirectMember.xml</LogicalName>
+      <Link>xml\DatabaseRoleDirectMember.xml</Link>
+    </EmbeddedResource>
     <EmbeddedResource Include="$(SqlEnumSourcesFiles)\xml\DbExtendedProperty.xml">
       <LogicalName>DbExtendedProperty.xml</LogicalName>
       <Link>xml\DbExtendedProperty.xml</Link>

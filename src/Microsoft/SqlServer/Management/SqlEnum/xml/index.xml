@@ -38,6 +38,15 @@
       <property_link fields = '#HasCompressedPartitions#HasXmlCompressedPartitions#' left_join="#extended_indexes AS allobj">
         allobj.parent_object_id = i.object_id AND allobj.index_id = i.index_id
       </property_link>
+      <!--
+        LEFT JOIN to the per-(object,index) aggregate populated by the prefix block.
+        Replaces the previous correlated MAX() subqueries that scanned sys.partitions
+        once per index per property.
+      -->
+      <property_link fields = '#HasCompressedPartitions#HasXmlCompressedPartitions#' left_join="#partition_compression AS pc">
+        pc.object_id = (CASE WHEN i.type = 4 THEN allobj.object_id ELSE i.object_id END)
+        AND pc.index_id = (CASE WHEN i.type = 4 THEN 1 ELSE i.index_id END)
+      </property_link>
     </version>
 
     <version min_major ="11">
@@ -84,6 +93,43 @@
         where o.type = 'IT' and o.name like 'extended[_]index[_]%'
       </prefix>
     </version>
+    <!--
+      Pre-aggregate sys.partitions compression state into a small temp table once per
+      enumeration. The previous per-row correlated subqueries on HasCompressedPartitions /
+      HasXmlCompressedPartitions caused the optimizer to scan sys.partitions multiple times
+      (one scan per property, per outer row branch in the CASE). Aggregating up front and
+      LEFT JOINing on the (object_id, index_id) key turns those scans into a single grouped
+      pass over the (typically small) set of compressed partitions.
+    -->
+    <version min_major='11' max_major='15' datawarehouse_enabled='true'>
+      <!--
+        Synapse dedicated SQL pool (DataWarehouse) does not support PRIMARY KEY on temp
+        tables, so this DW-applicable block omits the PK. The aggregate row count is
+        small enough that the missing index has no meaningful impact on join cost.
+      -->
+      <prefix fields='#HasCompressedPartitions#'>
+        create table #partition_compression (object_id int not null, index_id int not null, has_compressed bit not null, has_xml_compressed bit not null);
+        insert into #partition_compression (object_id, index_id, has_compressed, has_xml_compressed)
+        select object_id, index_id,
+          cast(case when max(data_compression) &gt; 0 then 1 else 0 end as bit),
+          cast(0 as bit)
+        from sys.partitions
+        where data_compression &gt; 0
+        group by object_id, index_id;
+      </prefix>
+    </version>
+    <version min_major='16' cloud_min_major='12'>
+      <prefix fields='#HasCompressedPartitions#HasXmlCompressedPartitions#'>
+        create table #partition_compression (object_id int not null, index_id int not null, has_compressed bit not null, has_xml_compressed bit not null, primary key clustered (object_id, index_id));
+        insert into #partition_compression (object_id, index_id, has_compressed, has_xml_compressed)
+        select object_id, index_id,
+          cast(case when max(data_compression) &gt; 0 then 1 else 0 end as bit),
+          cast(case when max(case when xml_compression = 1 then 1 else 0 end) &gt; 0 then 1 else 0 end as bit)
+        from sys.partitions
+        where data_compression &gt; 0 or xml_compression = 1
+        group by object_id, index_id;
+      </prefix>
+    </version>
     <version min_major='17' cloud_min_major='12'>
       <prefix fields='#VectorIndexMetric#VectorIndexType#'>
         create table #vectorindexes (object_id int, index_id int, distance_metric nvarchar(60), vector_index_type nvarchar(60));
@@ -113,6 +159,16 @@
     <version min_major='10' cloud_min_major='12' datawarehouse_enabled='true'>
       <postfix fields='#TableIDForPartition#HasCompressedPartitions#HasXmlCompressedPartitions#'>
         drop table #extended_indexes
+      </postfix>
+    </version>
+    <version min_major='11' max_major='15' datawarehouse_enabled='true'>
+      <postfix fields='#HasCompressedPartitions#'>
+        drop table #partition_compression
+      </postfix>
+    </version>
+    <version min_major='16' cloud_min_major='12'>
+      <postfix fields='#HasCompressedPartitions#HasXmlCompressedPartitions#'>
+        drop table #partition_compression
       </postfix>
     </version>
     <version min_major='17' cloud_min_major='12'>
@@ -357,16 +413,18 @@
       </property>
     </version>
 
+    <!--
+      HasCompressedPartitions / HasXmlCompressedPartitions are sourced from the
+      #partition_compression temp table populated in the prefix above. The CASE in the
+      join condition handles spatial indexes (i.type = 4), whose partitions are stored
+      against the extended index object rather than the parent index.
+    -->
     <version min_major ='11' cloud_min_major='12' datawarehouse_enabled='true'>
-      <property name="HasCompressedPartitions" type="bit" access='Read' cast='true' expensive='true'>
-        case when ((SELECT  MAX(data_compression) FROM sys.partitions  WHERE object_id = (CASE WHEN i.type = 4 THEN allobj.object_id ELSE i.object_id END) AND index_id = (CASE WHEN i.type = 4 THEN 1 ELSE i.index_id END)) &gt; 0) then 1 else 0 end
-      </property>
+      <property name="HasCompressedPartitions" type="bit" access='Read' cast='true'>ISNULL(pc.has_compressed, 0)</property>
     </version>
 
-    <version min_major='16'>
-      <property name="HasXmlCompressedPartitions" type="bit" access='Read' cast='true' expensive='true'>
-        case when ((SELECT  MAX(case when xml_compression = 1 then 1 else 0 end) FROM sys.partitions  WHERE object_id = (CASE WHEN i.type = 4 THEN allobj.object_id ELSE i.object_id END) AND index_id = (CASE WHEN i.type = 4 THEN 1 ELSE i.index_id END)) &gt; 0) then 1 else 0 end
-      </property>
+    <version min_major='16' cloud_min_major='12'>
+      <property name="HasXmlCompressedPartitions" type="bit" access='Read' cast='true'>ISNULL(pc.has_xml_compressed, 0)</property>
     </version>
 
      <!--Hekaton properties-->

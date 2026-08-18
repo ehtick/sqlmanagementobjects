@@ -49,7 +49,7 @@
     <version min_major='10'  cloud_min_major='12' datawarehouse_enabled='true'>
       <property name="DataCompression" type="int" report_type="DataCompressionType" >p.data_compression</property>
     </version>
-    <version min_major='16' datawarehouse_enabled='false'>
+    <version min_major='16' cloud_min_major='12' datawarehouse_enabled='false'>
       <property name="XmlCompression" type="int" report_type="XmlCompressionType" >p.xml_compression</property>
     </version>
   </properties>
