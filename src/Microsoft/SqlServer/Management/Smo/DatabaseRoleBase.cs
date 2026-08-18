@@ -2,9 +2,13 @@
 // Licensed under the MIT license.
 
 using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Data;
+using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.SqlServer.Management.Sdk.Sfc;
 using Microsoft.SqlServer.Management.Sdk.Sfc.Metadata;
 using Cmn = Microsoft.SqlServer.Management.Common;
@@ -19,40 +23,40 @@ namespace Microsoft.SqlServer.Management.Smo
     [Microsoft.SqlServer.Management.Sdk.Sfc.PhysicalFacet]
     [SfcElementType("Role")]
     public partial class DatabaseRole : ScriptNameObjectBase, Cmn.ICreatable, Cmn.IDroppable, Cmn.IDropIfExists, Cmn.IAlterable, Cmn.IRenamable, IExtendedProperties, IScriptable
-	{
+    {
         internal DatabaseRole(AbstractCollectionBase parentColl, ObjectKeyBase key, SqlSmoState state) :
-			base(parentColl, key, state)
-		{
-		}
+            base(parentColl, key, state)
+        {
+        }
 
-		// returns the name of the type in the urn expression
-		public static string UrnSuffix
-		{
-			get 
-			{
-				return "Role";
-			}
-		}
+        // returns the name of the type in the urn expression
+        public static string UrnSuffix
+        {
+            get 
+            {
+                return "Role";
+            }
+        }
 
         [SfcObject(SfcContainerRelationship.ChildContainer, SfcContainerCardinality.ZeroToAny, typeof(ExtendedProperty))]
-		public ExtendedPropertyCollection ExtendedProperties
-		{
-			get 
-			{
-				ThrowIfBelowVersion80();
-				CheckObjectState();
-				if( null == m_ExtendedProperties )
-				{
-					m_ExtendedProperties = new ExtendedPropertyCollection(this);
-				}
-				return m_ExtendedProperties;
-			}
-		}
+        public ExtendedPropertyCollection ExtendedProperties
+        {
+            get 
+            {
+                ThrowIfBelowVersion80();
+                CheckObjectState();
+                if( null == m_ExtendedProperties )
+                {
+                    m_ExtendedProperties = new ExtendedPropertyCollection(this);
+                }
+                return m_ExtendedProperties;
+            }
+        }
 
-		public void Drop()
-		{
-			base.DropImpl();
-		}
+        public void Drop()
+        {
+            base.DropImpl();
+        }
 
         /// <summary>
         /// Drops the object with IF EXISTS option. If object is invalid for drop function will
@@ -185,7 +189,7 @@ namespace Microsoft.SqlServer.Management.Smo
                 ScriptAssociations(createQuery, sp);
             }
 
-		}
+        }
 
         internal override void ScriptAssociations(StringCollection createQuery, ScriptingPreferences sp)
         {
@@ -279,28 +283,72 @@ namespace Microsoft.SqlServer.Management.Smo
             }
         }
 
-		
-		public StringCollection EnumMembers()
-		{
-			try
-			{
-				CheckObjectState();
-				
-				StringCollection memberList = new StringCollection();
-				Request req = new Request(this.Urn + "/Member");
-				foreach(DataRow dr in this.ExecutionManager.GetEnumeratorData(req).Rows)
-				{
-					memberList.Add(Convert.ToString(dr["Name"], SmoApplication.DefaultCulture));
-				}
+        
+        public StringCollection EnumMembers()
+        {
+            try
+            {
+                CheckObjectState();
+                
+                StringCollection memberList = new StringCollection();
+                Request req = new Request(this.Urn + "/Member");
+                foreach(DataRow dr in this.ExecutionManager.GetEnumeratorData(req).Rows)
+                {
+                    memberList.Add(Convert.ToString(dr["Name"], SmoApplication.DefaultCulture));
+                }
 
-				return memberList;
-			}
-			catch(Exception e)
-			{
-				SqlSmoObject.FilterException(e);
-                                throw new FailedOperationException(ExceptionTemplates.EnumMembers, this, e);
-                        }
-                 }
+                return memberList;
+            }
+            catch(Exception e)
+            {
+                SqlSmoObject.FilterException(e);
+                throw new FailedOperationException(ExceptionTemplates.EnumMembers, this, e);
+            }
+        }
+
+        /// <summary>
+        /// Asynchronously returns the direct members of this database role.
+        /// </summary>
+        public async Task<IEnumerable<string>> EnumDirectMembersAsync(CancellationToken cancellationToken = default(CancellationToken))
+        {
+            DataTable data;
+            try
+            {
+                CheckObjectState();
+                var req = new Request(this.Urn + "/DirectMember");
+                data = await ExecutionManager.GetEnumeratorDataAsync(req, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception e)
+            {
+                SqlSmoObject.FilterException(e);
+                throw new FailedOperationException(ExceptionTemplates.EnumMembers, this, e);
+            }
+
+            return data.Rows.Cast<DataRow>()
+                .Select(dr => Convert.ToString(dr["Name"], SmoApplication.DefaultCulture));
+        }
+
+        /// <summary>
+        /// Asynchronously returns the members of this database role.
+        /// </summary>
+        public async Task<IEnumerable<string>> EnumMembersAsync(CancellationToken cancellationToken = default(CancellationToken))
+        {
+            DataTable data;
+            try
+            {
+                CheckObjectState();
+                var req = new Request(this.Urn + "/Member");
+                data = await ExecutionManager.GetEnumeratorDataAsync(req, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception e)
+            {
+                SqlSmoObject.FilterException(e);
+                throw new FailedOperationException(ExceptionTemplates.EnumMembers, this, e);
+            }
+
+            return data.Rows.Cast<DataRow>()
+                .Select(dr => Convert.ToString(dr["Name"], SmoApplication.DefaultCulture));
+        }
 
         /// <summary>
         /// Script string to add this role to the given database role.
@@ -309,12 +357,12 @@ namespace Microsoft.SqlServer.Management.Smo
         /// <returns>The DDL string to add this database role to the given database role.</returns>
         private string ScriptAddToRole(System.String role, ScriptingPreferences sp)
         {
-	    if (VersionUtils.IsTargetServerVersionSQl11OrLater(sp.TargetServerVersion)
+        if (VersionUtils.IsTargetServerVersionSQl11OrLater(sp.TargetServerVersion)
             && sp.TargetDatabaseEngineType != Cmn.DatabaseEngineType.SqlAzureDatabase)
-	    {
-		return string.Format(SmoApplication.DefaultCulture,
-            		"ALTER ROLE {0} ADD MEMBER {1}", MakeSqlBraket(role), MakeSqlBraket(this.Name));
-	    }	
+        {
+        return string.Format(SmoApplication.DefaultCulture,
+                    "ALTER ROLE {0} ADD MEMBER {1}", MakeSqlBraket(role), MakeSqlBraket(this.Name));
+        }	
             else
             {
                 string myrolename;
@@ -391,7 +439,7 @@ namespace Microsoft.SqlServer.Management.Smo
             DataTable dt = this.ExecutionManager.GetEnumeratorData(req);
 #else
             StringCollection query = new StringCollection();
-	    StringBuilder statement = new StringBuilder();
+        StringBuilder statement = new StringBuilder();
 
             //Context for the query should be the current database.This was a bug in singleton.Also UseDB will 
             //Work for cloud as the context is same database.
@@ -418,21 +466,21 @@ namespace Microsoft.SqlServer.Management.Smo
             return roles;
         }
 
-		public StringCollection Script()
-		{
-			return ScriptImpl();
-		}
-		
-		// Script object with specific scripting optiions
-		public StringCollection Script(ScriptingOptions scriptingOptions)
-		{
-			return ScriptImpl(scriptingOptions);
-		}
+        public StringCollection Script()
+        {
+            return ScriptImpl();
+        }
+        
+        // Script object with specific scripting optiions
+        public StringCollection Script(ScriptingOptions scriptingOptions)
+        {
+            return ScriptImpl(scriptingOptions);
+        }
 
-		public void Rename(string newname)
-		{
-			base.RenameImpl(newname);
-		}		
+        public void Rename(string newname)
+        {
+            base.RenameImpl(newname);
+        }		
 
         internal override void ScriptRename(StringCollection renameQuery, ScriptingPreferences sp, string newName)
         {
@@ -475,24 +523,24 @@ namespace Microsoft.SqlServer.Management.Smo
         [SfcReference(typeof(DatabaseRole), "Server[@Name = '{0}']/Database[@Name = '{1}']/Role[@Name = '{2}']", "Parent.Parent.ConnectionContext.TrueName", "Parent.Name", "Owner")]
         [SfcReference(typeof(ApplicationRole), "Server[@Name = '{0}']/Database[@Name = '{1}']/ApplicationRole[@Name = '{2}']", "Parent.Parent.ConnectionContext.TrueName", "Parent.Name", "Owner")]
         [CLSCompliant(false)]
-		public System.String Owner
-		{
-			get
-			{
-				return (System.String)this.Properties.GetValueWithNullReplacement("Owner");
-			}
+        public System.String Owner
+        {
+            get
+            {
+                return (System.String)this.Properties.GetValueWithNullReplacement("Owner");
+            }
 
-			set
-			{
-				ThrowIfBelowVersion90();
-				Properties.SetValueWithConsistencyCheck("Owner", value);
-			}
-		}
+            set
+            {
+                ThrowIfBelowVersion90();
+                Properties.SetValueWithConsistencyCheck("Owner", value);
+            }
+        }
 
-		public void Alter()
-		{
-			base.AlterImpl();
-		}
+        public void Alter()
+        {
+            base.AlterImpl();
+        }
 
 
         internal override void ScriptAlter(StringCollection alterQuery, ScriptingPreferences sp)

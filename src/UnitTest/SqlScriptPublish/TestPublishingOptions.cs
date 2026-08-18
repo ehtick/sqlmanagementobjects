@@ -29,6 +29,7 @@ namespace Microsoft.SqlServer.Test.SqlScriptPublishTests
             ScriptPrimaryKeys = true;
             ScriptUniqueKeys = true;
             ScriptViewColumns = true;
+            ScriptXmlCompressionOptions = true;
         }
 
         public bool ConvertUddtToBaseType { get; set; }

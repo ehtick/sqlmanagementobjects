@@ -4503,6 +4503,12 @@
   <data name="Server_IsHadrEnabledDesc" xml:space="preserve">
     <value>Gets the Boolean value that specifies whether the instance of Microsoft SQL Server is enabled to use HADR service.</value>
   </data>
+  <data name="Server_IsLocalDBName" xml:space="preserve">
+    <value>Is LocalDB</value>
+  </data>
+  <data name="Server_IsLocalDBDesc" xml:space="preserve">
+    <value>Gets the Boolean value that specifies whether the instance of Microsoft SQL Server is a LocalDB instance.</value>
+  </data>
   <data name="Server_HadrManagerStatusName" xml:space="preserve">
     <value>High Availability Disaster Recovery Manager Status</value>
   </data>

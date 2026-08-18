@@ -503,6 +503,7 @@
         <object type="ExtendedProperty" assembly="Microsoft.SqlServer.SqlEnum" implement="Microsoft.SqlServer.Management.Smo.SqlObject" cfg="ExtendedProperty.xml" />
         <object type="Permission" assembly="Microsoft.SqlServer.SqlEnum" implement="Microsoft.SqlServer.Management.Smo.SqlObject" cfg="YukonObjectPerm.xml" />
         <object type="Member" assembly="Microsoft.SqlServer.SqlEnum" implement="Microsoft.SqlServer.Management.Smo.SqlObject" cfg="DatabaseRoleMember.xml" />
+        <object type="DirectMember" assembly="Microsoft.SqlServer.SqlEnum" implement="Microsoft.SqlServer.Management.Smo.SqlObject" cfg="DatabaseRoleDirectMember.xml" />
       </object>
       <object type="ApplicationRole" assembly="Microsoft.SqlServer.SqlEnum" implement="Microsoft.SqlServer.Management.Smo.SqlObject" cfg="ApplicationRole.xml">
         <object type="ExtendedProperty" assembly="Microsoft.SqlServer.SqlEnum" implement="Microsoft.SqlServer.Management.Smo.SqlObject" cfg="ExtendedProperty.xml" />

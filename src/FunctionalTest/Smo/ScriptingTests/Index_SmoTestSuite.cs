@@ -13,7 +13,9 @@ using System.Threading;
 #else
 using System.Data.SqlClient;
 #endif
+using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Data;
 using Microsoft.SqlServer.Test.Manageability.Utils.Helpers;
 using Microsoft.SqlServer.Test.Manageability.Utils.TestFramework;
 using NUnit.Framework;
@@ -497,6 +499,20 @@ $"CREATE TABLE [dbo].[HekatonColumnstoreScripting_testTable]{Environment.NewLine
                         pkIdx.IndexedColumns.Add(new _SMO.IndexedColumn(pkIdx, "pk"));
                         table.Indexes.Add(pkIdx);
                         table.Create();
+
+                        // Populate the table with minimum required sample data to allow vector index creation.
+                        database.ExecuteNonQuery($@"INSERT INTO {table.Name.SqlBracketQuoteString()} (pk, vecCol)
+SELECT
+    n,
+    CAST('[' +
+        CAST(n * 0.1 AS VARCHAR(10)) + ',' +
+        CAST(n * 0.2 AS VARCHAR(10)) + ',' +
+        CAST(n * 0.3 AS VARCHAR(10)) +
+    ']' AS VECTOR(3))
+FROM (
+    SELECT TOP 100 ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS n
+     FROM sys.all_objects
+) t;");
 
                         // Create the vector index
                         _SMO.Index index = new _SMO.Index(table, "VectorIndex_" + table.Name)
@@ -2681,10 +2697,14 @@ $"CREATE TABLE [dbo].[HekatonColumnstoreScripting_testTable]{Environment.NewLine
         #region Performance Tests
 
         /// <summary>
-        /// Verifies that enumerating indexes with HasCompressedPartitions completes quickly even
-        /// when the database has many tables and indexes. The underlying query joins to
-        /// sys.internal_tables (or sys.all_objects on DW) to resolve extended index objects,
-        /// and previously used a non-sargable string concatenation join that scaled poorly.
+        /// Verifies that enumerating indexes with HasCompressedPartitions (and
+        /// HasXmlCompressedPartitions where supported) completes quickly even when the
+        /// database has many tables and indexes. The underlying query previously issued
+        /// per-row correlated MAX() subqueries against sys.partitions for each property,
+        /// causing the optimizer to scan sys.partitions multiple times. The optimization
+        /// pre-aggregates partition compression state into a #partition_compression temp
+        /// table once and LEFT JOINs against it. The test also exercises the
+        /// #extended_indexes join path used to resolve spatial-index partitions.
         /// </summary>
         [_VSUT.TestMethod]
         [SupportedServerVersionRange(DatabaseEngineType = DatabaseEngineType.Standalone, MinMajor = 11)]
@@ -2731,38 +2751,82 @@ $"CREATE TABLE [dbo].[HekatonColumnstoreScripting_testTable]{Environment.NewLine
 
                     database.ExecuteNonQuery(sb.ToString());
 
-                    // Pick one table to enumerate indexes on
+                    // Pick one table for IsSupportedProperty checks and the later spatial section.
                     var targetTable = database.Tables["perf_t0"];
                     Assert.That(targetTable, Is.Not.Null, "Target table should exist after bulk creation");
 
-                    // Force the index enumeration query to include HasCompressedPartitions, which
-                    // triggers the join to extended index objects (the previously slow path).
-                    var stopwatch = Stopwatch.StartNew();
-
-                    targetTable.Indexes.ClearAndInitialize(string.Empty, new[]
+                    // Request the full property set used by the database-maintenance-plan
+                    // enumeration reported in the bug. In addition to the compression
+                    // properties (which drive the #partition_compression aggregate), this
+                    // forces joins to sys.key_constraints, sys.xml_indexes, sys.stats, and
+                    // the extended_properties WHERE filter — mirroring the production query
+                    // shape that originally regressed in customer plans.
+                    var supportsXmlCompression = targetTable.IsSupportedProperty(nameof(_SMO.Index.HasXmlCompressedPartitions));
+                    var fields = new List<string>
                     {
-                        nameof(_SMO.Index.HasCompressedPartitions)
-                    });
-
-                    // Access the property on each index to ensure the query actually ran
-                    foreach (_SMO.Index idx in targetTable.Indexes)
+                        nameof(_SMO.Index.Name),
+                        nameof(_SMO.Index.IsSystemNamed),
+                        nameof(_SMO.Index.IndexKeyType),
+                        nameof(_SMO.Index.IndexType),
+                        nameof(_SMO.Index.IsUnique),
+                        nameof(_SMO.Index.IsClustered),
+                        nameof(_SMO.Index.IsDisabled),
+                        nameof(_SMO.Index.IgnoreDuplicateKeys),
+                        nameof(_SMO.Index.FillFactor),
+                        nameof(_SMO.Index.PadIndex),
+                        nameof(_SMO.Index.DisallowRowLocks),
+                        nameof(_SMO.Index.DisallowPageLocks),
+                        nameof(_SMO.Index.NoAutomaticRecomputation),
+                        nameof(_SMO.Index.HasCompressedPartitions),
+                        nameof(_SMO.Index.IsSystemObject),
+                    };
+                    if (supportsXmlCompression)
                     {
-                        // Reading the property forces materialization of the fetched value
-                        _ = idx.HasCompressedPartitions;
+                        fields.Add(nameof(_SMO.Index.HasXmlCompressedPartitions));
                     }
+                    var compressionFields = fields.ToArray();
 
+                    // Issue the database-wide enumeration the way SMO does internally for
+                    // PrefetchObjects / Scripter / maintenance-plan rebuild-index: a single
+                    // URN selecting every Index under every non-system Table in the database.
+                    // ParentPropertiesRequests on Table adds the Schema/Name columns and
+                    // produces ORDER BY [Table_Schema], [Table_Name], [Name] — matching the
+                    // exact query shape from the bug, with no per-table filter.
+                    var urn = new SFC.Urn(
+                        $"Server/Database[@Name='{SFC.Urn.EscapeString(database.Name)}']/Table[@IsSystemObject=false()]/Index");
+                    var request = new SFC.Request(urn, compressionFields)
+                    {
+                        OrderByList = new[] { new SFC.OrderBy("Name", SFC.OrderBy.Direction.Asc) },
+                        ParentPropertiesRequests = new[]
+                        {
+                            new SFC.PropertiesRequest
+                            {
+                                Fields = new[] { "Schema", "Name" },
+                                OrderByList = new[]
+                                {
+                                    new SFC.OrderBy("Schema", SFC.OrderBy.Direction.Asc),
+                                    new SFC.OrderBy("Name", SFC.OrderBy.Direction.Asc)
+                                }
+                            }
+                        }
+                    };
+
+                    var stopwatch = Stopwatch.StartNew();
+                    var result = (DataSet)new SFC.Enumerator().Process(database.Parent.ConnectionContext, request);
+                    var indexRowCount = result.Tables[0].Rows.Count;
                     stopwatch.Stop();
 
                     Trace.TraceInformation(
-                        $"Index enumeration with {nameof(_SMO.Index.HasCompressedPartitions)} for {tableCount} tables " +
-                        $"completed in {stopwatch.Elapsed.TotalSeconds:F2} seconds");
+                        $"Database-wide Index enumeration with {string.Join(", ", compressionFields)} " +
+                        $"returned {indexRowCount} rows across {tableCount} tables " +
+                        $"in {stopwatch.Elapsed.TotalSeconds:F2} seconds");
 
                     Assert.That(stopwatch.Elapsed.TotalSeconds, Is.LessThan(10),
-                        "Index enumeration with HasCompressedPartitions should complete in under 10 seconds. " +
-                        "A slow result indicates the extended_indexes join may have regressed to the non-sargable path.");
+                        $"Database-wide Index enumeration with [{string.Join(", ", compressionFields)}] should complete in under 10 seconds. " +
+                        "A slow result indicates the partition-compression aggregate may have regressed to the per-row correlated subquery path.");
 
-                    Assert.That(targetTable.Indexes.Count, Is.GreaterThanOrEqualTo(indexesPerTable),
-                        "Target table should have at least the created nonclustered indexes");
+                    Assert.That(indexRowCount, Is.GreaterThanOrEqualTo(tableCount * indexesPerTable),
+                        $"Enumeration should return at least {tableCount * indexesPerTable} index rows (one per nonclustered index across all user tables).");
 
                     // Verify the spatial index with DATA_COMPRESSION has HasCompressedPartitions = true.
                     // This proves the #extended_indexes temp table correctly joins sys.internal_tables
@@ -2774,12 +2838,105 @@ $"CREATE TABLE [dbo].[HekatonColumnstoreScripting_testTable]{Environment.NewLine
 
                         spatialTable.Indexes.ClearAndInitialize(
                             $"[@Name='{SFC.Urn.EscapeString("ix_perf_spatial_geom")}']",
-                            new[] { nameof(_SMO.Index.HasCompressedPartitions) });
+                            compressionFields);
 
                         var spatialIndex = spatialTable.Indexes["ix_perf_spatial_geom"];
                         Assert.That(spatialIndex, Is.Not.Null, "Spatial index should exist");
                         Assert.That(spatialIndex.HasCompressedPartitions, Is.True,
                             "Spatial index created with DATA_COMPRESSION should report HasCompressedPartitions = true");
+                        if (supportsXmlCompression)
+                        {
+                            Assert.That(spatialIndex.HasXmlCompressedPartitions, Is.False,
+                                "Spatial index has DATA_COMPRESSION but no XML_COMPRESSION; HasXmlCompressedPartitions should be false");
+                        }
+                    }
+                });
+        }
+
+        /// <summary>
+        /// Verifies that fetching HasCompressedPartitions and HasXmlCompressedPartitions together
+        /// (the path used by index script generation) returns correct values for a mix of
+        /// compressed, uncompressed, regular, and spatial indexes. This exercises the
+        /// #partition_compression temp-table optimization end-to-end: the LEFT JOIN must use
+        /// the CASE-based join key so spatial indexes (i.type = 4) resolve via #extended_indexes,
+        /// and the ISNULL must yield 0 for indexes without a matching row in the aggregate.
+        /// </summary>
+        [_VSUT.TestMethod]
+        [SupportedServerVersionRange(DatabaseEngineType = DatabaseEngineType.Standalone, MinMajor = 11)]
+        [SupportedServerVersionRange(DatabaseEngineType = DatabaseEngineType.SqlAzureDatabase, MinMajor = 12)]
+        [UnsupportedDatabaseEngineEdition(DatabaseEngineEdition.SqlOnDemand, DatabaseEngineEdition.Express)]
+        public void Index_HasCompressedPartitions_ReportsCorrectValuesAcrossIndexTypes()
+        {
+            this.ExecuteWithDbDrop(
+                database =>
+                {
+                    var supportsSpatial =
+                        !database.IsFabricDatabase &&
+                        database.DatabaseEngineEdition != DatabaseEngineEdition.SqlDataWarehouse &&
+                        database.DatabaseEngineEdition != DatabaseEngineEdition.SqlDatabaseEdge;
+
+                    // Set up a single table with both compressed and uncompressed nonclustered indexes,
+                    // and (where supported) a separate table with a compressed spatial index.
+                    database.ExecuteNonQuery(@"
+                        CREATE TABLE [dbo].[t_mixed] (id int NOT NULL PRIMARY KEY CLUSTERED, c1 int, c2 int);
+                        CREATE NONCLUSTERED INDEX [ix_compressed]   ON [dbo].[t_mixed] (c1) WITH (DATA_COMPRESSION = PAGE);
+                        CREATE NONCLUSTERED INDEX [ix_uncompressed] ON [dbo].[t_mixed] (c2);");
+
+                    if (supportsSpatial)
+                    {
+                        database.ExecuteNonQuery(@"
+                            CREATE TABLE [dbo].[t_spatial] (id int NOT NULL PRIMARY KEY CLUSTERED, geom geometry);
+                            CREATE SPATIAL INDEX [ix_spatial_compressed] ON [dbo].[t_spatial] ([geom])
+                                WITH (BOUNDING_BOX = (-180, -90, 180, 90), DATA_COMPRESSION = PAGE);");
+                    }
+
+                    var mixed = database.Tables["t_mixed"];
+                    Assert.That(mixed, Is.Not.Null, "Mixed-compression table should exist");
+
+                    // Determine which fields to request. Always request HasCompressedPartitions; on
+                    // SQL 16+ also request HasXmlCompressedPartitions so both flow through the same
+                    // #partition_compression join.
+                    var fields = mixed.IsSupportedProperty(nameof(_SMO.Index.HasXmlCompressedPartitions))
+                        ? new[]
+                        {
+                            nameof(_SMO.Index.HasCompressedPartitions),
+                            nameof(_SMO.Index.HasXmlCompressedPartitions)
+                        }
+                        : new[] { nameof(_SMO.Index.HasCompressedPartitions) };
+
+                    mixed.Indexes.ClearAndInitialize(string.Empty, fields);
+
+                    var compressed = mixed.Indexes["ix_compressed"];
+                    Assert.That(compressed, Is.Not.Null, "Compressed index should be enumerated");
+                    Assert.That(compressed.HasCompressedPartitions, Is.True,
+                        "ix_compressed was created WITH (DATA_COMPRESSION = PAGE) and should report HasCompressedPartitions = true");
+
+                    var uncompressed = mixed.Indexes["ix_uncompressed"];
+                    Assert.That(uncompressed, Is.Not.Null, "Uncompressed index should be enumerated");
+                    Assert.That(uncompressed.HasCompressedPartitions, Is.False,
+                        "ix_uncompressed has no compression and should report HasCompressedPartitions = false. " +
+                        "A true value here would indicate the LEFT JOIN to #partition_compression is incorrectly matching unrelated rows.");
+
+                    if (mixed.IsSupportedProperty(nameof(_SMO.Index.HasXmlCompressedPartitions)))
+                    {
+                        Assert.That(compressed.HasXmlCompressedPartitions, Is.False,
+                            "ix_compressed has DATA_COMPRESSION but no XML_COMPRESSION; HasXmlCompressedPartitions should be false");
+                        Assert.That(uncompressed.HasXmlCompressedPartitions, Is.False,
+                            "ix_uncompressed has no compression of any kind; HasXmlCompressedPartitions should be false");
+                    }
+
+                    if (supportsSpatial)
+                    {
+                        var spatialTable = database.Tables["t_spatial"];
+                        Assert.That(spatialTable, Is.Not.Null, "Spatial table should exist");
+
+                        spatialTable.Indexes.ClearAndInitialize(string.Empty, fields);
+                        var spatialIndex = spatialTable.Indexes["ix_spatial_compressed"];
+                        Assert.That(spatialIndex, Is.Not.Null, "Spatial index should be enumerated");
+                        Assert.That(spatialIndex.HasCompressedPartitions, Is.True,
+                            "Spatial index created with DATA_COMPRESSION should report HasCompressedPartitions = true. " +
+                            "This validates the CASE WHEN i.type = 4 join key in the #partition_compression LEFT JOIN " +
+                            "correctly resolves to the extended index object_id.");
                     }
                 });
         }

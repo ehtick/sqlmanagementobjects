@@ -50,6 +50,18 @@ Defines a join to a table. See [SqlPropertyLink.cs](../SqlPropertyLink.cs) for h
 
      ** Consider using a temp table for new property_link entries, particularly in data types that already have a high number of joins. Direct joins on system DMVs and catalog views often have a high performance penalty. Use a prefix entry to populate the temp table and a postfix to drop it. **
 
+### Availability and Safety for Catalog Views
+
+When a property_link depends on a `sys.*` view or column that might be unavailable on some target versions/editions, add safety logic in `prefix` so enumeration does not fail.
+
+Use this decision guide:
+
+1. If the entire view may be missing, wrap the `insert ... from sys.view` statement in `begin try ... end try` and `begin catch ... end catch`.
+2. If the view exists but a specific column may be missing, use an `if exists` check against `sys.all_columns` before querying it.
+3. If the column exists only on specific editions/SKUs, gate the insert with `SERVERPROPERTY(...)` checks (for example `EngineEdition`, and when needed `ProductUpdateType`).
+
+In all cases, keep the temp table schema stable and let unsupported targets return empty/default values instead of throwing.
+
 ### parent_link
 
 Defines a property whose value is pulled from the parent object
@@ -74,6 +86,14 @@ Used to selectively include/exclude other elements based on the version specifie
     cloud_Min_build - The minimum build version (Cloud) the contents of this element will be included in
     cloud_Max_build - The maximum build version (Cloud) the contents of this element will be included in
     datawarehouse_enabled - Whether this object is enabled for Datawarehouse, in addition to the other versions specified by the version tags (including non-DW Azure databases)
+
+#### Impact on IsSupportedProperty
+
+The version attributes directly control `IsSupportedProperty()` behavior in SMO C# code. This determines whether explicit edition guards are needed in scripter methods:
+
+- **Cloud-only properties** (only `cloud_min_major`, no `min_major`): `IsSupportedProperty` returns `false` for standalone SQL Server automatically. No explicit guard is needed in the scripter method — the `IsSupportedProperty` check is sufficient.
+- **Standalone + cloud properties** (both `min_major` and `cloud_min_major`): `IsSupportedProperty` returns `true` for both standalone and cloud. If the property should not be scripted for Azure targets, the scripter method must add an explicit guard.
+- **Omitting `datawarehouse_enabled`**: The property will not be available on SQL DW/Fabric editions. `IsSupportedProperty` returns `false` for those editions without needing a `GetDisabledProperties` entry.
 
 ### property
 
@@ -148,3 +168,4 @@ Now it also acts as similarly to `post_process` by being a general purpose condi
 - SQL DW doesn't support primary keys in temp tables
 - For non-DW use primary keys in temp tables where possible for better performance
 - When adding new properties, consider the performance impact of adding additional joins to the main query. If the join is expensive, consider using a temp table populated in a prefix tag and dropped in a postfix tag.
+- Also account for metadata availability differences across versions/editions. Use try/catch, `sys.all_columns` checks, or `SERVERPROPERTY(...)` guards when a catalog view or column may not exist everywhere.

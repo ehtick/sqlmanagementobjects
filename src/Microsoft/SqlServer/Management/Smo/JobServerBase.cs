@@ -8,6 +8,8 @@ using System.Data;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.SqlServer.Management.Sdk.Sfc;
 using Microsoft.SqlServer.Management.Sdk.Sfc.Metadata;
 using Cmn = Microsoft.SqlServer.Management.Common;
@@ -317,6 +319,74 @@ namespace Microsoft.SqlServer.Management.Smo.Agent
             // calls into the base function, after with the input parameters cleaned
             return base.ImplInitialize( newFields, newOrderBy );
         }
+
+        /// <summary>
+        /// Asynchronously initializes an object with a list of properties, filtering out "Name" field
+        /// which JobServer does not have
+        /// </summary>
+        /// <param name="fields">Array of field names to initialize</param>
+        /// <param name="orderby">OrderBy clause</param>
+        /// <param name="cancellationToken">Cancellation token for the async operation</param>
+        /// <returns>Task returning true if initialization succeeded, false otherwise</returns>
+        protected override async Task<bool> ImplInitializeAsync(string[] fields, OrderBy[] orderby, CancellationToken cancellationToken)
+        {
+            var newFields = fields;
+            var newOrderBy = orderby;
+
+            var foundName = false;
+            if (fields is not null)
+            {
+                foreach (var s in fields)
+                {
+                    if (s == "Name")
+                    {
+                        foundName = true;
+                        break;
+                    }
+                }
+
+                if (foundName && fields.Length > 1)
+                {
+                    newFields = new string[fields.Length - 1];
+                    var count = 0;
+                    foreach (var s in fields)
+                    {
+                        if (s != "Name")
+                        {
+                            newFields[count++] = s;
+                        }
+                    }
+                }
+            }
+
+            foundName = false;
+            if (orderby is not null)
+            {
+                foreach (var ob in orderby)
+                {
+                    if (ob.Field == "Name")
+                    {
+                        foundName = true;
+                    }
+                }
+
+                if (foundName && orderby.Length > 1)
+                {
+                    newOrderBy = new OrderBy[orderby.Length - 1];
+                    var count = 0;
+                    foreach (var ob in orderby)
+                    {
+                        if (ob.Field != "Name")
+                        {
+                            newOrderBy[count++] = ob;
+                        }
+                    }
+                }
+            }
+            // calls into the base function, after with the input parameters cleaned
+            return await base.ImplInitializeAsync(newFields, newOrderBy, cancellationToken).ConfigureAwait(false);
+        }
+
 
         /// <summary>
         /// Tests the mail profile. Returns true when a failure occurs. In that case the 

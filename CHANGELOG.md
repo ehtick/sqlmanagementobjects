@@ -3,6 +3,24 @@
 Update this document for externally visible changes. Put most recent changes first.
 Once we push a new version to nuget.org add a double hash header for that version.
 
+## 181.36.0
+
+- Fix default value for QueryStoreOptions CapturePolicyStaleThresholdInHrs to be 24
+- Add `Server.IsLocalDB` to report whether the connected SQL Server instance is LocalDB.
+- Add vNext support for Automatic Index Compaction (AIC)
+- Mark `Server.Information.RootDirectory` as an expensive property so it is no longer included in the bulk fetch of `Server.Information` properties.
+- Remove the unused custom Sfc read-only collection interfaces (`IReadOnlyCollection`, `IReadOnlyCollection<T>`, `IReadOnlyList<T>`, `IReadOnlyDictionary<K,T>`, `IReadOnlySet`, `IReadOnlySet<T>`) and their `ReadOnlyList<T>` / `ReadOnlyDictionary<TKey,TValue>` implementations from `Microsoft.SqlServer.Management.Sdk.Sfc`, since they collided with the BCL `System.Collections.Generic` types and were not used.
+- Add `DatabaseRole.EnumDirectMembers()` which returns only the direct members of the role.
+- Add async object initialization methods to SqlSmoObject:
+  - `InitializeAsync()` - asynchronously fetch default properties
+  - `InitializeAsync(string[] fields)` - asynchronously fetch specific properties
+  - `RefreshAsync()` - asynchronously refresh all properties
+  - After async initialization, properties are accessible synchronously from in-memory cache
+  - Supports cancellation via CancellationToken
+- Speed up Index enumeration when `HasCompressedPartitions` / `HasXmlCompressedPartitions` are requested by pre-aggregating `sys.partitions` into a temp table once per query, replacing per-row correlated `MAX()` subqueries that scanned `sys.partitions` multiple times.
+- Expose `Index.HasXmlCompressedPartitions` on Azure SQL Database (previously available only on SQL Server 2022+).
+- Bump AssemblyFileVersion build component baseline to 11 for SmoVersion 18 so file versions stay monotonically increasing across release branches (the 180 branch shipped 18.100.10.x; without this, 181 builds regressed to 18.100.1.x and could be skipped by MSI RemoveExistingProducts)
+
 ## 181.25.0
 
 - Add .NET 10.0 target framework support to SMO NuGet packages

@@ -3,6 +3,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Linq;
 
 namespace Microsoft.SqlServer.Test.Manageability.Utils.Helpers
 {
@@ -116,8 +117,11 @@ namespace Microsoft.SqlServer.Test.Manageability.Utils.Helpers
                 var output = ExecuteFabricCliCommand($"create {resourcePath}");
                 created = true;
                 Trace.TraceInformation($"Fabric {resourceTypeString.ToLowerInvariant()} created: {output}");
-                // Get the connection string for the newly created resource
-                var connectionString = ExecuteFabricCliCommand($"get {resourcePath} -q properties.connectionString -f")+DefaultAuthMethod;
+                // Get the connection string for the newly created resource. The Fabric CLI can emit
+                // an upgrade notice banner to stdout, so extract just the
+                // connection string line before appending the authentication method.
+                var rawConnectionString = ExecuteFabricCliCommand($"get {resourcePath} -q properties.connectionString -f");
+                var connectionString = ExtractConnectionString(rawConnectionString) + DefaultAuthMethod;
                 System.Threading.Thread.Sleep(15000); // Sleep for 15 seconds to allow the resource to be fully provisioned and ready for connections
                 return connectionString;
             }
@@ -222,6 +226,44 @@ namespace Microsoft.SqlServer.Test.Manageability.Utils.Helpers
         /// <summary>
         /// Executes Fabric-Cli Command and returns the output.
         /// </summary>
+        /// <summary>
+        /// Extracts the connection string from raw Fabric CLI output.
+        /// </summary>
+        /// <remarks>
+        /// The Fabric CLI (fab.exe) can prepend an upgrade notice banner to stdout before the actual
+        /// value, which would otherwise corrupt the connection string passed to
+        /// <see cref="Microsoft.Data.SqlClient.SqlConnectionStringBuilder"/>. This method returns the
+        /// connection string line from the output.
+        /// </remarks>
+        /// <param name="rawOutput">The raw stdout captured from the Fabric CLI.</param>
+        /// <returns>The extracted connection string, or an empty string if none is found.</returns>
+        internal static string ExtractConnectionString(string rawOutput)
+        {
+            if (string.IsNullOrWhiteSpace(rawOutput))
+            {
+                return string.Empty;
+            }
+
+            var lines = rawOutput
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0)
+                .ToList();
+
+            if (lines.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            // The connection string is a Fabric SQL endpoint (e.g. *.database.fabric.microsoft.com).
+            // Prefer the last line containing the Fabric endpoint host to skip any notice/changelog
+            // lines the CLI may print; fall back to the last non-empty line.
+            var connectionStringLine = lines.LastOrDefault(line => line.IndexOf("fabric.microsoft.com", StringComparison.OrdinalIgnoreCase) >= 0)
+                ?? lines[lines.Count - 1];
+
+            return connectionStringLine;
+        }
+
         private string ExecuteFabricCliCommand(string arguments, bool interactiveInputNeeded = false)
         {
             var output = string.Empty;

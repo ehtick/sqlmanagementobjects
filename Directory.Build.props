@@ -13,4 +13,9 @@
     <EnlistmentRoot>$(MSBuildThisFileDirectory.TrimEnd('\\'))</EnlistmentRoot>
     <NetfxVersion>net472</NetfxVersion>
   </PropertyGroup>
+
+  <!-- BinSkim BA2004: EnableSecureSourceCodeHashing (C#) -->
+  <PropertyGroup>
+    <ChecksumAlgorithm>SHA256</ChecksumAlgorithm>
+  </PropertyGroup>
 </Project>

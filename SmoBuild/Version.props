@@ -26,8 +26,16 @@
     <!-- The minor version is either 0 (for GAC) or 100 (for applocal) -->
     <AssemblyMinorVersion Condition="'$(AssemblyMinorVersion)'=='' and '$(GacVersion)' == 'true'">0</AssemblyMinorVersion>
     <AssemblyMinorVersion Condition="'$(AssemblyMinorVersion)'==''">100</AssemblyMinorVersion>
+    <!-- Baseline offset for AssemblyBuildVersion to keep AssemblyFileVersion monotonically
+         increasing across release branches within the same AssemblyMajorVersion. The 180
+         release branch shipped with file version 18.100.10.x, so any subsequent branch under
+         the 18 major must produce a build component strictly greater than 10 to avoid MSI
+         downgrade issues (e.g. RemoveExistingProducts keeping older files with higher file
+         versions). Reset this to 0 when AssemblyMajorVersion is bumped. -->
+    <AssemblyBuildVersionBaseline Condition="'$(AssemblyBuildVersionBaseline)'=='' and '$(AssemblyMajorVersion)'=='18'">10</AssemblyBuildVersionBaseline>
+    <AssemblyBuildVersionBaseline Condition="'$(AssemblyBuildVersionBaseline)'==''">0</AssemblyBuildVersionBaseline>
     <!-- Essentially the "minor" version for a given major version, allows us to have multiple release branches for a given major version -->
-    <AssemblyBuildVersion Condition="'$(AssemblyBuildVersion)'==''">$(PackageMajorVersionIncrement)</AssemblyBuildVersion>
+    <AssemblyBuildVersion Condition="'$(AssemblyBuildVersion)'==''">$([MSBuild]::Add($(AssemblyBuildVersionBaseline), $(PackageMajorVersionIncrement)))</AssemblyBuildVersion>
     <!-- The revision will be incremented with each build -->
     <AssemblyRevisionVersion Condition="'$(AssemblyRevisionVersion)'==''">0</AssemblyRevisionVersion>
     <AssemblyFileVersion Condition="'$(AssemblyFileVersion)'==''">$(AssemblyMajorVersion).$(AssemblyMinorVersion).$(AssemblyBuildVersion).$(AssemblyRevisionVersion)</AssemblyFileVersion>

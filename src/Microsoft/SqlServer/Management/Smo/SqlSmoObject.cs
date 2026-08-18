@@ -24,6 +24,8 @@ using Microsoft.SqlServer.Management.Smo.Agent;
 using Microsoft.SqlServer.Management.Sdk.Sfc.Metadata;
 using Microsoft.SqlServer.Management.Sdk.Sfc;
 using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Microsoft.SqlServer.Management.Smo
 {
@@ -1558,6 +1560,12 @@ namespace Microsoft.SqlServer.Management.Smo
 
             bool bInit = ImplInitialize(fields, orderby);
 
+            // Transition from Creating to Existing if initialization succeeded
+            if (this.State == SqlSmoState.Creating && bInit)
+            {
+                SetState(SqlSmoState.Existing);
+            }
+
             // change object state according to the result of the initialization
             if (allProperties)
             {
@@ -1740,6 +1748,245 @@ namespace Microsoft.SqlServer.Management.Smo
 
             return true;
         }
+
+        /// <summary>
+        /// Asynchronously initializes the object by reading its default properties from the enumerator
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token for the async operation</param>
+        /// <returns>Task representing the async operation</returns>
+        public async Task InitializeAsync(CancellationToken cancellationToken = default(CancellationToken))
+        {
+            await InitializeAsync(false, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Asynchronously initializes the object with specific properties
+        /// </summary>
+        /// <param name="fields">Array of field names to initialize</param>
+        /// <param name="cancellationToken">Cancellation token for the async operation</param>
+        /// <returns>Task representing the async operation</returns>
+        public async Task InitializeAsync(string[] fields, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            await ImplInitializeAsync(fields, null, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Asynchronously refreshes the object's properties by reading all properties from the server
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token for the async operation</param>
+        /// <returns>Task representing the async operation</returns>
+        public async Task RefreshAsync(CancellationToken cancellationToken = default(CancellationToken))
+        {
+            try
+            {
+                CheckObjectStateImpl(false);
+
+                // Make object state transitions
+                if (this.State == SqlSmoState.Creating && await InitializeAsync(false, cancellationToken).ConfigureAwait(false))
+                {
+                    SetState(SqlSmoState.Existing);
+                }
+                else if (this.State == SqlSmoState.Existing)
+                {
+                    // verify that the object has not been dropped
+                    System.Data.IDataReader reader = null;
+                    try
+                    {
+                        // limit the request to fields composing the key if we have any
+                        // if there are no fields in the key this is a singleton and
+                        // it does not make sense to check for its existance
+                        ObjectKeyBase key = this.key;
+                        Debug.Assert(key is not null, "key is null");
+                        StringCollection keyFields = key.GetFieldNames();
+                        if (keyFields.Count > 0)
+                        {
+                            string[] fields = new string[keyFields.Count];
+                            keyFields.CopyTo(fields, 0);
+                            reader = await GetInitDataReaderAsync(fields, null, cancellationToken).ConfigureAwait(false);
+                            if (reader == null)
+                            {
+                                SetState(SqlSmoState.Dropped);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        reader?.Close();
+                    }
+                }
+
+                // implement Refresh by clearing the property bag
+                properties = null;
+                propertyBagState = PropertyBagState.Empty;
+                initializedForScripting = false;
+
+                // clean the permissions cache. We need to do it here as opposed to
+                // the other collections because this is not exposed publicly.
+                userPermissions = null;
+
+                m_ExtendedProperties = null;
+            }
+            catch (Exception e)
+            {
+                FilterException(e);
+
+                throw new FailedOperationException(ExceptionTemplates.Refresh, this, e);
+            }
+        }
+
+        /// <summary>
+        /// Internal async initialization helper
+        /// </summary>
+        /// <param name="allProperties">If true, fetch all properties; if false, fetch default fields</param>
+        /// <param name="cancellationToken">Cancellation token for the async operation</param>
+        /// <returns>Task returning true if initialization succeeded, false otherwise</returns>
+        private async Task<bool> InitializeAsync(bool allProperties, CancellationToken cancellationToken)
+        {
+            CheckObjectState();
+#if INCLUDE_PERF_COUNT
+            if( PerformanceCounters.DoCount )
+                PerformanceCounters.InitializeCallsCount++;
+#endif
+            // if the object does not exist or it has already been initialized there is
+            // no point in initializing the object.
+            // In Design Mode the property bag is never read from the backend
+            if (this.IsDesignMode || (allProperties && IsObjectInitialized()))
+            {
+                return false;
+            }
+
+            string[] fields = null;
+            OrderBy[] orderby = null;
+            if (!allProperties)
+            {
+                // lazy initialization
+                fields = GetServerObject().GetDefaultInitFieldsInternal(this.GetType(), this.DatabaseEngineEdition);
+            }
+
+            bool bInit = await ImplInitializeAsync(fields, orderby, cancellationToken).ConfigureAwait(false);
+
+            // Transition from Creating to Existing if initialization succeeded
+            if (this.State == SqlSmoState.Creating && bInit)
+            {
+                SetState(SqlSmoState.Existing);
+            }
+
+            // change object state according to the result of the initialization
+            if (allProperties)
+            {
+                if (bInit)
+                {
+                    propertyBagState = PropertyBagState.Full;
+                }
+            }
+            else
+            {
+                if (bInit)
+                {
+                    if (propertyBagState != PropertyBagState.Full)
+                    {
+                        propertyBagState = PropertyBagState.Lazy;
+                    }
+                }
+            }
+
+            return bInit;
+        }
+
+        /// <summary>
+        /// Asynchronously retrieves a System.Data.IDataReader object that will contain the result of the query
+        /// to obtain the object's properties.
+        /// </summary>
+        /// <param name="fields">Array of field names to retrieve</param>
+        /// <param name="orderby">OrderBy clause</param>
+        /// <param name="cancellationToken">Cancellation token for the async operation</param>
+        /// <returns>Task containing IDataReader with the results, or null if no data</returns>
+        private async Task<System.Data.IDataReader> GetInitDataReaderAsync(string[] fields, OrderBy[] orderby, CancellationToken cancellationToken)
+        {
+            Urn urn = this.Urn;
+
+            // build the request object
+            Request req = new Request();
+            req.Urn = urn;
+
+            // speed up enumerator queries : do not request Urn when all the properties are
+            // requested, we are ignoring it anyway
+            if (fields == null)
+            {
+                // accept all non expensive properties besides Urn
+                req.Fields = GetRejectFields();
+                req.RequestFieldsTypes = RequestFieldsTypes.Reject;
+            }
+            else
+            {
+                req.Fields = fields;
+            }
+            req.OrderByList = orderby;
+
+            // retrieve the data into the property collection
+            // This query should return just one row !
+            System.Data.IDataReader reader = await this.ExecutionManager.GetEnumeratorDataReaderAsync(req, cancellationToken).ConfigureAwait(false);
+
+            // if the table has no rows this means that initialization of the object has failed
+            bool hasRows = reader is SqlDataReader sqlReader
+                ? await sqlReader.ReadAsync(cancellationToken).ConfigureAwait(false)
+                : reader.Read();
+
+            if (!hasRows)
+            {
+                reader.Close();
+                return null; // no rows is a normal "object does not exist" result; caller handles it
+            }
+
+            return reader;
+        }
+
+        /// <summary>
+        /// Asynchronously initializes an object with a list of properties
+        /// </summary>
+        /// <param name="fields">Array of field names to initialize</param>
+        /// <param name="orderby">OrderBy clause</param>
+        /// <param name="cancellationToken">Cancellation token for the async operation</param>
+        /// <returns>Task returning true if initialization succeeded, false otherwise</returns>
+        protected virtual async Task<bool> ImplInitializeAsync(string[] fields, OrderBy[] orderby, CancellationToken cancellationToken)
+        {
+            //there are objects which have only one property, the Urn.
+            //don't attempt to initialize those.
+            if ((this.Properties.Count <= 0 && parentColl == null) ||
+                (null != fields && fields.Length == 0))
+            {
+                //initialization succedded, there was nothing to initialize
+                return true;
+            }
+
+            System.Data.IDataReader reader = null;
+            try
+            {
+                reader = await GetInitDataReaderAsync(fields, orderby, cancellationToken).ConfigureAwait(false);
+                if (reader == null)
+                {
+                    return false;
+                }
+
+                AddObjectPropsFromDataReader(reader, true);
+#if DEBUG
+                if (reader.Read())
+                {
+                    throw new InternalSmoErrorException(ExceptionTemplates.FormatMultipleRowsForUrn(this.Urn));
+                }
+#endif
+            }
+            finally
+            {
+                if (null != reader)
+                {
+                    reader.Close();
+                }
+            }
+
+            return true;
+        }
+
 
         /// <summary>
         /// Populates the object's property bag from the current row of the DataReader
@@ -4269,10 +4516,13 @@ namespace Microsoft.SqlServer.Management.Smo
         /// <returns></returns>
         public IEnumerable<string> GetDisabledProperties(ScriptingPreferences sp = null)
         {
-            return GetDisabledProperties(GetType(), sp == null ? DatabaseEngineEdition : sp.TargetDatabaseEngineEdition);
+            return GetDisabledProperties(
+                GetType(),
+                sp == null ? DatabaseEngineEdition : sp.TargetDatabaseEngineEdition,
+                sp == null ? ScriptingOptions.ConvertToSqlServerVersion(ServerVersion) : sp.TargetServerVersion);
         }
 
-        internal static IEnumerable<string> GetDisabledProperties(Type type, DatabaseEngineEdition databaseEngineEdition)
+        internal static IEnumerable<string> GetDisabledProperties(Type type, DatabaseEngineEdition databaseEngineEdition, SqlServerVersion targetServerVersion)
         {
             switch (type.Name)
             {
@@ -4282,8 +4532,10 @@ namespace Microsoft.SqlServer.Management.Smo
                         {
                             yield return nameof(Database.DataRetentionEnabled);
                         }
-                        if (databaseEngineEdition != DatabaseEngineEdition.SqlManagedInstance
-                            && databaseEngineEdition != DatabaseEngineEdition.SqlDatabase)
+                        if ((databaseEngineEdition == DatabaseEngineEdition.Enterprise && targetServerVersion < SqlServerVersion.Version180)
+                            || (databaseEngineEdition != DatabaseEngineEdition.SqlManagedInstance
+                            && databaseEngineEdition != DatabaseEngineEdition.SqlDatabase
+                            && databaseEngineEdition != DatabaseEngineEdition.Enterprise))
                         {
                             yield return nameof(Database.AutomaticIndexCompactionEnabled);
                         }

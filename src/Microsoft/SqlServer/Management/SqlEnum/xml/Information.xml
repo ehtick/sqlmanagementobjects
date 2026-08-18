@@ -236,7 +236,10 @@
       <property name="PhysicalMemory" type="int" access="Read" expensive='true'>(select Internal_Value from #SVer where Name = N'PhysicalMemory')</property>
       <property name="Processors" type="int" access="Read" expensive='true'>(select Internal_Value from #SVer where Name = N'ProcessorCount')</property>
       <property name="ErrorLogPath" type="nvarchar" size="512" access="Read">@ErrorLogPath</property>
-      <property name="RootDirectory" type="nvarchar" size='512' access="Read">@SmoRoot</property>
+      <!-- xp_instance_regread is blocked in some security-focused environments, which means that fetching Information properties will
+           throw by default for those users when fetching all properties. So mark this as expensive to exclude this from being included
+           in the default list of properties -->
+      <property name="RootDirectory" type="nvarchar" size='512' access="Read" expensive='true'>@SmoRoot</property>
     </version>
 
     <version min_major="7" max_major="13" cloud_min_major="11" datawarehouse_enabled='true'>

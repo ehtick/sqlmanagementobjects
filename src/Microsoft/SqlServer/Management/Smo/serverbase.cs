@@ -3931,7 +3931,7 @@ namespace Microsoft.SqlServer.Management.Smo
         public bool IsSupportedProperty(Type type, string propertyName, DatabaseEngineEdition databaseEngineEdition = DatabaseEngineEdition.Unknown)
         {
             databaseEngineEdition = databaseEngineEdition != DatabaseEngineEdition.Unknown ? databaseEngineEdition : DatabaseEngineEdition;
-            return !SqlSmoObject.GetDisabledProperties(type, databaseEngineEdition).Contains(propertyName) 
+            return !SqlSmoObject.GetDisabledProperties(type, databaseEngineEdition, ScriptingOptions.ConvertToSqlServerVersion(ServerVersion)).Contains(propertyName) 
                 && SqlPropertyMetadataProvider.CheckPropertyValid(MetadataProviderLookup.GetPropertyMetadataProviderType(type), propertyName, ServerVersion, DatabaseEngineType, databaseEngineEdition);
         }
 
